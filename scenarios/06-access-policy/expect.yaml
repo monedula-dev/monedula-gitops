@@ -1,0 +1,27 @@
+cli:
+  apply:
+    exitCode: 0
+k8s:
+  conditions:
+    - kind: KafkaAccessPolicy
+      name: billing-access
+      type: Ready
+      status: "True"
+    - kind: KafkaAccessPolicy
+      name: billing-access
+      type: AccessPolicySynced
+      status: "True"
+liveState:
+  acls:
+    - principal: "User:svc-billing"
+      operation: Write
+      resourceType: transactionalId
+      resourceName: billing-tx
+    - principal: "User:svc-billing"
+      operation: Describe
+      resourceType: transactionalId
+      resourceName: billing-tx
+    - principal: "User:svc-billing"
+      operation: Read
+      resourceType: group
+      resourceName: billing-cg

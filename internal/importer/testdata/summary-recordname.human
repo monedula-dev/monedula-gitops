@@ -1,0 +1,15 @@
+Cluster: prod-eu
+Topics: 2
+Topic access rules: 2
+Access policies: 1
+Policy rules: 1
+Schemas: 0
+Quotas: 0
+Role bindings: 0
+Users: 0
+RecordName subjects: 2
+Warnings:
+  principal "User:x" has ambiguous consumer group mapping
+RecordName subjects needing manual attribution (2):
+  - com.example.events.OrderPlaced  (record com.example.events.OrderPlaced, AVRO)
+  - com.example.payments.PaymentSettled  (record com.example.payments.PaymentSettled, AVRO)

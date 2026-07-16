@@ -1,0 +1,17 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaRoleBinding
+metadata:
+  name: checkout-read
+spec:
+  clusterRef:
+    name: shared
+  principal: User:svc-checkout
+  role: DeveloperRead
+  scope:
+    type: kafka
+  resources:
+    - type: Topic
+      name: payments.
+      patternType: prefixed
+  reconciliation:
+    mode: Enforce

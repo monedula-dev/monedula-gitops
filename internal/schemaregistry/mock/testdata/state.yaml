@@ -1,0 +1,8 @@
+subjects:
+  - subject: payments.orders-value
+    type: AVRO
+    definition: '{"type":"record","name":"Order","fields":[]}'
+    compatibility: BACKWARD
+  - subject: orders.events-value
+    type: AVRO
+    definition: '{"type":"record","name":"Event","fields":[]}'

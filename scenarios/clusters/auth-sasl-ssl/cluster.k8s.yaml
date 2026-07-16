@@ -1,0 +1,35 @@
+# KafkaCluster CR for k8s (operator) mode with SASL_SSL / SCRAM-SHA-512.
+#
+# The operator resolves tls.caCert from a Kubernetes Secret (secretKeyRef).
+# The kafka-ca Secret must exist in the operator's namespace (see
+# k8s/kafka-tls-secret.yaml).
+#
+# Kubernetes Secret references required:
+#   kafka-ca (namespace: kafka)  -- key: ca.crt (the dev CA PEM from certs/)
+#   SCRAM credentials are typically injected via environment from a Kubernetes
+#   Secret or ConfigMap (wired by the operator deployment).
+#
+# Note: name: shared matches the clusterRef.name used by scenarios that opt into
+# this profile (cluster: auth-sasl-ssl in scenario.yaml).
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: shared
+spec:
+  bootstrapServers: kafka.kafka.svc.cluster.local:9092
+  tls:
+    enabled: true
+    caCert:
+      valueFrom:
+        secretKeyRef:
+          name: kafka-ca
+          key: ca.crt
+  auth:
+    mechanism: SCRAM-SHA-512
+    scram:
+      username:
+        valueFrom:
+          env: KAFKA_USERNAME
+      password:
+        valueFrom:
+          env: KAFKA_PASSWORD

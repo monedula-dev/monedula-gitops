@@ -1,0 +1,16 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: rbac-imp
+  annotations:
+    gitops.monedula.dev/mock-state-file: import-rbac-state.yaml
+    gitops.monedula.dev/mock-mds-file: import-rbac-mds.yaml
+spec:
+  bootstrapServers: localhost:9092
+  authorization:
+    mds:
+      endpoint: https://mds.example.com
+      clusters:
+        kafkaCluster: lkc-rbac01
+    accessBackends:
+      - rbac

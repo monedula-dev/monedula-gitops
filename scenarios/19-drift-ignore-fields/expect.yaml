@@ -1,0 +1,8 @@
+steps:
+  - run: apply
+    expect: { exitCode: 0 }
+  - run: mutate
+    mutate:
+      topicConfig: { topic: ignore.demo, set: { retention.ms: "999999" } }
+  - run: verify
+    expect: { exitCode: 0 }

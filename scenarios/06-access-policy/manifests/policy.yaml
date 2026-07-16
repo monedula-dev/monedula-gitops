@@ -1,0 +1,27 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaAccessPolicy
+metadata:
+  name: billing-access
+spec:
+  clusterRef:
+    name: shared
+  rules:
+    - principal: "User:svc-billing"
+      permission: Allow
+      host: "*"
+      resource:
+        type: transactionalId
+        name: billing-tx
+        patternType: literal
+      operations:
+        - Write
+        - Describe
+    - principal: "User:svc-billing"
+      permission: Allow
+      host: "*"
+      resource:
+        type: group
+        name: billing-cg
+        patternType: literal
+      operations:
+        - Read

@@ -1,0 +1,228 @@
+# Monedula k8s quickstart: single-node Kafka (KRaft) + SCRAM bootstrap Job.
+#
+# Security model (DEMO ONLY -- credentials are intentionally fake):
+#   - Kafka CLIENT traffic uses SASL_PLAINTEXT / SCRAM-SHA-512 on :9092.
+#   - INTERNAL traffic (inter-broker + SCRAM bootstrap) is PLAINTEXT on :9094.
+#
+# SCRAM bootstrap deadlock avoidance:
+#   Creating a SCRAM user normally requires an authenticated admin connection,
+#   but the only admin is the SCRAM user you are trying to create. We break the
+#   cycle by exposing an internal PLAINTEXT listener (INTERNAL://:9094) that is
+#   ALSO the inter-broker listener. The broker therefore starts with NO SCRAM
+#   credential present, and the `kafka-scram-bootstrap` Job creates the SCRAM
+#   users over that plaintext listener. Schema Registry then connects on :9092.
+#
+#   The broker still needs a KafkaServer JAAS entry to ENABLE its SASL CLIENT
+#   listener (the kafka-jaas ConfigMap, wired via KAFKA_OPTS). Because inter-broker
+#   auth is PLAINTEXT, that entry carries no creds -- it only declares the
+#   ScramLoginModule; client logins validate against the SCRAM store once the
+#   bootstrap Job has populated it.
+---
+# Broker-side JAAS: a single global KafkaServer entry that enables the SASL CLIENT
+# listener. No username/password (inter-broker is PLAINTEXT); SCRAM client logins
+# are validated against the broker's own credential store.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-jaas
+  namespace: kafka
+data:
+  kafka-jaas.conf: |
+    KafkaServer {
+      org.apache.kafka.common.security.scram.ScramLoginModule required;
+    };
+---
+# Headless-capable ClusterIP Service. In-cluster clients resolve the broker via
+# kafka.kafka.svc.cluster.local. We advertise that DNS name on both listeners,
+# so connecting clients (operator on :9092, SR on :9092, bootstrap on :9094)
+# always reach the single broker through this Service.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: kafka
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/part-of: monedula-quickstart
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: kafka
+  ports:
+    - name: client          # SASL_PLAINTEXT / SCRAM-SHA-512 (operator + SR)
+      port: 9092
+      targetPort: 9092
+    - name: internal        # PLAINTEXT inter-broker + SCRAM bootstrap path
+      port: 9094
+      targetPort: 9094
+    # Controller (:9093) is intra-pod KRaft quorum only -- not exposed.
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: kafka
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/part-of: monedula-quickstart
+spec:
+  # StatefulSet gives a stable network identity, which suits a single-node KRaft
+  # broker that advertises a fixed DNS name. Single replica for the quickstart.
+  serviceName: kafka
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kafka
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka
+        app.kubernetes.io/part-of: monedula-quickstart
+    spec:
+      containers:
+        - name: kafka
+          image: confluentinc/cp-kafka:8.0.0
+          ports:
+            - name: client
+              containerPort: 9092
+            - name: internal
+              containerPort: 9094
+          env:
+            # --- KRaft single-node (broker + controller in one process) ---
+            - name: KAFKA_NODE_ID
+              value: "1"
+            - name: KAFKA_PROCESS_ROLES
+              value: "broker,controller"
+            # Single-node controller quorum: use localhost:9093 so the broker
+            # does not depend on its own Service DNS resolving during the very
+            # first KRaft bootstrap. (The controller listener is intra-pod.)
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: "1@localhost:9093"
+            - name: CLUSTER_ID
+              value: "4L6g3nShT-eMCtK--X86sw"
+
+            # --- Listeners ---
+            # CONTROLLER : KRaft quorum (PLAINTEXT, intra-pod only)
+            # INTERNAL   : inter-broker + SCRAM bootstrap path (PLAINTEXT)
+            # CLIENT     : SASL listener for the operator + Schema Registry
+            - name: KAFKA_LISTENERS
+              value: "CONTROLLER://:9093,INTERNAL://:9094,CLIENT://:9092"
+            # Advertise the in-cluster Service DNS on both reachable listeners so
+            # clients re-resolve to the broker after bootstrap.
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "INTERNAL://kafka.kafka.svc.cluster.local:9094,CLIENT://kafka.kafka.svc.cluster.local:9092"
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: "CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,CLIENT:SASL_PLAINTEXT"
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: "CONTROLLER"
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: "INTERNAL"
+
+            # --- SASL / authorization ---
+            - name: KAFKA_SASL_ENABLED_MECHANISMS
+              value: "SCRAM-SHA-512"
+            # Broker-side JAAS that ENABLES the SASL CLIENT listener. Inter-broker
+            # is PLAINTEXT, so this entry carries no creds -- it only declares the
+            # ScramLoginModule; client logins validate against the SCRAM store.
+            - name: KAFKA_OPTS
+              value: "-Djava.security.auth.login.config=/etc/kafka/secrets/kafka-jaas.conf"
+            - name: KAFKA_AUTHORIZER_CLASS_NAME
+              value: "org.apache.kafka.metadata.authorizer.StandardAuthorizer"
+            - name: KAFKA_SUPER_USERS
+              value: "User:admin"
+            # Quickstart simplification: allow access when no explicit ACL exists,
+            # so the `monedula` app user works without pre-creating per-resource ACLs.
+            - name: KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND
+              value: "true"
+
+            # --- Misc single-node tuning (RF=1: only one broker) ---
+            # Default RF for topics created without an explicit replication factor
+            # (the broker resolves the -1 the tool sends to this value).
+            - name: KAFKA_DEFAULT_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+            - name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
+              value: "0"
+          readinessProbe:
+            # Probe over the INTERNAL plaintext listener -- no auth needed.
+            exec:
+              command:
+                - kafka-broker-api-versions
+                - --bootstrap-server
+                - localhost:9094
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 12
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            - name: kafka-data
+              mountPath: /var/lib/kafka/data
+            - name: kafka-jaas
+              mountPath: /etc/kafka/secrets
+              readOnly: true
+      volumes:
+        # emptyDir keeps the quickstart simple; data is ephemeral per pod.
+        - name: kafka-data
+          emptyDir: {}
+        - name: kafka-jaas
+          configMap:
+            name: kafka-jaas
+---
+# One-shot Job: create the SCRAM users over the PLAINTEXT INTERNAL listener.
+# Jobs have no depends_on, so the command waits for the broker to answer on
+# :9094 before running kafka-configs.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-scram-bootstrap
+  namespace: kafka
+  labels:
+    app.kubernetes.io/name: kafka-scram-bootstrap
+    app.kubernetes.io/part-of: monedula-quickstart
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka-scram-bootstrap
+        app.kubernetes.io/part-of: monedula-quickstart
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: bootstrap
+          image: confluentinc/cp-kafka:8.0.0
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              echo "Waiting for kafka:9094 (PLAINTEXT internal listener)..."
+              until kafka-broker-api-versions --bootstrap-server kafka.kafka.svc.cluster.local:9094 >/dev/null 2>&1; do
+                echo "  kafka not ready yet, retrying in 5s"
+                sleep 5
+              done
+              echo "Kafka is up. Creating SCRAM users..."
+              kafka-configs --bootstrap-server kafka.kafka.svc.cluster.local:9094 --alter \
+                --add-config 'SCRAM-SHA-512=[password=admin-secret]' \
+                --entity-type users --entity-name admin
+              kafka-configs --bootstrap-server kafka.kafka.svc.cluster.local:9094 --alter \
+                --add-config 'SCRAM-SHA-512=[password=monedula-secret]' \
+                --entity-type users --entity-name monedula
+              echo "SCRAM users created (admin, monedula)"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi

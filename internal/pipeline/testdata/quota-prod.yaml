@@ -1,0 +1,12 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaQuota
+metadata:
+  name: svc-checkout-quota
+  namespace: payments
+spec:
+  clusterRef:
+    name: prod
+  entity:
+    user: "User:svc-checkout"
+  limits:
+    producerByteRate: 1048576

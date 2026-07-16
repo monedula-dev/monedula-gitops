@@ -1,0 +1,16 @@
+steps:
+  - run: apply
+    expect: { exitCode: 0 }
+  - run: mutate
+    mutate:
+      topicConfig: { topic: drift.demo, set: { cleanup.policy: delete } }
+  - run: verify
+    expect: { exitCode: 1, outputContains: ["cleanup.policy"] }
+  - run: apply
+    expect: { exitCode: 0 }
+  - run: verify
+    expect: { exitCode: 0 }
+liveState:
+  topics:
+    - name: drift.demo
+      config: { cleanup.policy: compact }

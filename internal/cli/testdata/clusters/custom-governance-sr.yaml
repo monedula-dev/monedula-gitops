@@ -1,0 +1,11 @@
+# The producer's pipeline registered v1..v2 of the ARBITRARY subject
+# "my.custom.subject" out-of-band; the current compatibility is BACKWARD. The
+# manifest desires FULL, so the only emitted op is a single
+# RaiseSchemaCompatibility on "my.custom.subject" — NEVER RegisterSchema.
+subjects:
+  - subject: my.custom.subject
+    type: AVRO
+    compatibility: BACKWARD
+    versions:
+      - '{"type":"record","name":"Order","fields":[]}'
+      - '{"type":"record","name":"Order","fields":[{"name":"id","type":"string"}]}'

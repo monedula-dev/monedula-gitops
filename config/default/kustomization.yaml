@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Cluster-scoped operator, webhook OFF (cert-free). Default install target and
+# remote-ref entrypoint:
+#   kubectl apply -k github.com/monedula-dev/monedula-gitops/config/default?ref=vX
+namespace: monedula-system
+
+labels:
+- includeSelectors: false
+  pairs:
+    app.kubernetes.io/name: monedula-gitops
+    app.kubernetes.io/managed-by: kustomize
+
+resources:
+- ../crd
+- ../rbac
+- ../manager
+
+# Override the operator image without editing manifests:
+#   kustomize edit set image ghcr.io/monedula-dev/monedula-gitops=myrepo/img:tag
+images:
+- name: ghcr.io/monedula-dev/monedula-gitops
+  newName: ghcr.io/monedula-dev/monedula-gitops
+  newTag: "0.8.0"

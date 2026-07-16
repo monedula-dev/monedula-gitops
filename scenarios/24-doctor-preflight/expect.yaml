@@ -1,0 +1,5 @@
+steps:
+  - run: doctor
+    expect:
+      exitCode: 0
+      outputContains: ["kafka-admin", "schema-registry", "Doctor: healthy"]

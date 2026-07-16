@@ -1,0 +1,45 @@
+# k8s-shaped KafkaCluster CR for the auth-mds profile (operator mode).
+# The in-kind operator connects to host.docker.internal:9099 (CLIENTKIND,
+# SASL/PLAIN via LDAP) and reaches the MDS REST API via the host-forwarded
+# port at host.docker.internal:8090 (MDS itself advertises http://kafka:8090
+# on the internal network; the host port mapping is what makes it reachable
+# from inside kind). Creds come from the kafka-mds Secret created by
+# setup_auth_profile.
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: shared
+  labels:
+    app.kubernetes.io/part-of: monedula-e2e
+spec:
+  bootstrapServers: host.docker.internal:9099
+  auth:
+    mechanism: PLAIN
+    scram:
+      username:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-mds
+            key: kafka-username
+      password:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-mds
+            key: kafka-password
+  authorization:
+    mds:
+      endpoint: http://host.docker.internal:8090
+      auth:
+        type: basic
+        username:
+          valueFrom:
+            secretKeyRef:
+              name: kafka-mds
+              key: mds-username
+        password:
+          valueFrom:
+            secretKeyRef:
+              name: kafka-mds
+              key: mds-password
+      clusters:
+        kafkaCluster: "4L6g3nShT-eMCtK--X86sw"

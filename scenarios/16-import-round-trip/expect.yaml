@@ -1,0 +1,8 @@
+steps:
+  - run: apply
+    expect: { exitCode: 0 }
+  - run: import
+    flags: ["--skip-schemas"]
+  - run: verify
+    manifests: "@imported"
+    expect: { exitCode: 0 }

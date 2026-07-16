@@ -1,0 +1,11 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaQuota
+metadata:
+  name: svc-checkout-quota
+spec:
+  clusterRef:
+    name: scoped-topics-denied
+  entity:
+    user: "User:svc-checkout"
+  limits:
+    producerByteRate: 1048576

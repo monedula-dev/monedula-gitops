@@ -1,0 +1,12 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaQuota
+metadata:
+  name: rt-quota
+spec:
+  clusterRef:
+    name: shared
+  entity:
+    user: "User:rt-quota-user"
+  limits:
+    producerByteRate: 1048576
+    consumerByteRate: 2097152

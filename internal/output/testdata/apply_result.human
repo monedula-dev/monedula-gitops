@@ -1,0 +1,5 @@
+Cluster: prod-eu
+Succeeded UpdateTopicConfig KafkaTopic/orders payments.orders [field=config.retention.ms 86400000 -> 604800000] (risk=Low)
+Blocked IncreasePartitions KafkaTopic/orders payments.orders [field=partitions 3 -> 6] (risk=Medium)
+ReportOnly UpdateTopicConfig KafkaTopic/refunds payments.refunds [field=config.retention.ms 86400000 -> 604800000] (risk=Low) (mode=DetectOnly, report-only)
+Applied: 1 Blocked, 1 ReportOnly, 1 Succeeded

@@ -1,0 +1,6 @@
+topics:
+  - name: payments.orders
+    partitions: 6
+    config:
+      retention.ms: "604800000"
+acls: []

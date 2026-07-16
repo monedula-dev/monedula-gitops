@@ -1,0 +1,28 @@
+# Certificate for the webhook server's TLS serving cert.
+# cert-manager creates the Secret named monedula-gitops-webhook-serving-cert in
+# monedula-system, which is mounted into the operator pod at the
+# controller-runtime default cert dir (/tmp/k8s-webhook-server/serving-certs).
+#
+# DNS SANs cover both the short and FQDN forms of the webhook Service so the
+# API server can reach it whether or not it appends the cluster domain.
+#
+# cert-manager also injects this Certificate's CA bundle into the
+# ValidatingWebhookConfiguration (see config/webhook/manifests.yaml annotation).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: monedula-gitops-webhook-cert
+  namespace: monedula-system
+  labels:
+    app.kubernetes.io/name: monedula-gitops
+    app.kubernetes.io/component: operator
+spec:
+  secretName: monedula-gitops-webhook-serving-cert
+  duration: 8760h   # 1 year
+  renewBefore: 720h # renew 30 days before expiry
+  issuerRef:
+    name: monedula-gitops-selfsigned-issuer
+    kind: Issuer
+  dnsNames:
+  - monedula-gitops-webhook-service.monedula-system.svc
+  - monedula-gitops-webhook-service.monedula-system.svc.cluster.local

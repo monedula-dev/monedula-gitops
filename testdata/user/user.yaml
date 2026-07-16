@@ -1,0 +1,12 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaUser
+metadata:
+  name: svc-payments
+spec:
+  clusterRef:
+    name: user-dev
+  mechanism: SCRAM-SHA-512
+  iterations: 8192
+  password:
+    valueFrom:
+      env: MONEDULA_TEST_SVC_PAYMENTS_PASSWORD

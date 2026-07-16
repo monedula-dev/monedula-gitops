@@ -1,0 +1,4 @@
+Cluster: prod-eu
+UpdateTopicConfig KafkaTopic/orders payments.orders [field=config.retention.ms 86400000 -> 604800000] (risk=Low approval=false)
+CreateAcl KafkaTopic/orders User:svc-checkout Write topic:payments.orders Allow (risk=Low approval=false)
+UpdateTopicConfig KafkaTopic/refunds payments.refunds [field=config.retention.ms 86400000 -> 604800000] (risk=Low approval=false) (mode=DetectOnly, report-only)

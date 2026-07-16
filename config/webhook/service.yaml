@@ -1,0 +1,23 @@
+# Service that routes the Kubernetes API server to the operator's webhook server
+# (port 9443).  The API server uses this Service to reach the ValidatingWebhook
+# defined in config/webhook/manifests.yaml.
+#
+# Selector matches the operator Deployment pods (config/manager/manager.yaml).
+# The Service name must match the clientConfig.service.name in manifests.yaml.
+apiVersion: v1
+kind: Service
+metadata:
+  name: monedula-gitops-webhook-service
+  namespace: monedula-system
+  labels:
+    app.kubernetes.io/name: monedula-gitops
+    app.kubernetes.io/component: operator
+spec:
+  selector:
+    app.kubernetes.io/name: monedula-gitops
+    app.kubernetes.io/component: operator
+  ports:
+  - name: webhook
+    port: 443
+    targetPort: webhook
+    protocol: TCP

@@ -1,0 +1,18 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaTopic
+metadata:
+  name: orders
+spec:
+  clusterRef:
+    name: sfn
+  topicName: payments.orders
+  partitions: 1
+  # Governance mode (spec §12.2): no valueSchema body — monedula manages ONLY
+  # the subject compatibility level. The subject has NO subject-level override
+  # yet, so it effectively runs at the registry's GLOBAL default (BACKWARD,
+  # seeded in schema-fresh-none-sr.yaml). Declaring NONE is therefore an
+  # EFFECTIVE lowering: a gated LowerSchemaCompatibility (spec §17.1), not an
+  # ungated first-set Raise.
+  schema:
+    format: AVRO
+    compatibility: NONE

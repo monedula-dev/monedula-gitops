@@ -1,0 +1,16 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaTopic
+metadata:
+  name: orders
+spec:
+  clusterRef:
+    name: gov
+  topicName: payments.orders
+  partitions: 1
+  # Governance mode (spec §12.2): no valueSchema/keySchema body — monedula
+  # manages ONLY the subject compatibility level. The producer's pipeline
+  # registers versions out-of-band (seeded v1..v3 in governance-sr.yaml),
+  # which is NOT drift. The only desired change is compatibility convergence.
+  schema:
+    format: AVRO
+    compatibility: FULL

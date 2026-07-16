@@ -1,0 +1,11 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: impsch
+  annotations:
+    gitops.monedula.dev/mock-state-file: schema-import-state.yaml
+    gitops.monedula.dev/mock-schema-file: schema-import-sr.yaml
+spec:
+  bootstrapServers: localhost:9092
+  schemaRegistry:
+    endpoint: http://sr

@@ -1,0 +1,4 @@
+title: Schema evolution (compatibility governance)
+modes: [cli]
+cluster: shared-sasl
+summary: A BACKWARD-compatible schema change is accepted as a new version, while an incompatible change is rejected by the Schema Registry compatibility check.

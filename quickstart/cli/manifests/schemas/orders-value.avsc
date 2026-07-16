@@ -1,0 +1,10 @@
+{
+  "type": "record",
+  "name": "Order",
+  "namespace": "payments",
+  "fields": [
+    {"name": "orderId", "type": "string"},
+    {"name": "amount", "type": "long"},
+    {"name": "currency", "type": "string", "default": "EUR"}
+  ]
+}

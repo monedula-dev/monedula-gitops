@@ -1,0 +1,4 @@
+title: User quota
+modes: [cli, k8s]
+cluster: shared-sasl
+summary: Apply a KafkaQuota capping producer and consumer byte rates for a named user and verify the quota is live on the broker.

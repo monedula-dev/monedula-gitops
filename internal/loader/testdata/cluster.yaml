@@ -1,0 +1,6 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: prod
+spec:
+  bootstrapServers: broker:9092

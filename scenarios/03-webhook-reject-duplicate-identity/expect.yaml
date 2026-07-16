@@ -1,0 +1,4 @@
+k8s:
+  admission:
+    rejected: true
+    messageMatches: "topic identity (cluster, topicName) must be unique"

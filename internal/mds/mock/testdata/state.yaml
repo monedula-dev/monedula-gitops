@@ -1,0 +1,22 @@
+roleBindings:
+  - principal: User:alice
+    role: DeveloperRead
+    scopeType: kafka
+    kafkaCluster: lkc-abc123
+    resource:
+      type: Topic
+      name: payments.orders
+      patternType: literal
+  - principal: User:bob
+    role: ResourceOwner
+    scopeType: schema-registry
+    kafkaCluster: lkc-abc123
+    subCluster: lsrc-xyz789
+  - principal: User:svc-checkout
+    role: DeveloperWrite
+    scopeType: kafka
+    kafkaCluster: lkc-abc123
+    resource:
+      type: Topic
+      name: payments.
+      patternType: prefixed

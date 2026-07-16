@@ -1,0 +1,13 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: a
+spec:
+  bootstrapServers: kafka.a:9092
+---
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: b
+spec:
+  bootstrapServers: kafka.b:9092

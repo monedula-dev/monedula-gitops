@@ -1,0 +1,10 @@
+/monedula-gitops
+/dist/
+*.out
+.DS_Store
+.idea/
+/bin/
+/main
+.claude/
+
+/docs/internal/

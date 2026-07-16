@@ -1,0 +1,13 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: prod
+spec:
+  bootstrapServers: kafka.prod:9092
+  defaults:
+    replicationFactor: 3
+  authorization:
+    mds:
+      endpoint: https://mds.prod:8090
+      clusters:
+        kafkaCluster: lkc-abc123

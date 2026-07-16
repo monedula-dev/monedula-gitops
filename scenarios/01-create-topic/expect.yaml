@@ -1,0 +1,15 @@
+cli:
+  apply:
+    exitCode: 0
+    outputContains: ["payments.orders"]
+k8s:
+  conditions:
+    - kind: KafkaTopic
+      name: payments-orders
+      type: Ready
+      status: "True"
+liveState:
+  topics:
+    - name: payments.orders
+      config:
+        cleanup.policy: compact

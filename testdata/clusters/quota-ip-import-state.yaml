@@ -1,0 +1,8 @@
+topics: []
+acls: []
+quotas:
+  - entity:
+      - type: ip
+        name: 10.0.0.1
+    limits:
+      connection_creation_rate: 100

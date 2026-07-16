@@ -1,0 +1,13 @@
+# Governance mode (spec §12.2): the PRODUCER'S pipeline has registered v1..v3
+# of payments.orders-value out-of-band. monedula owns no schema content, so
+# those versions are NOT drift and must NEVER trigger RegisterSchema. The
+# subject's current compatibility is BACKWARD; the manifest desires FULL, so the
+# only emitted op is a single RaiseSchemaCompatibility.
+subjects:
+  - subject: payments.orders-value
+    type: AVRO
+    compatibility: BACKWARD
+    versions:
+      - '{"type":"record","name":"Order","fields":[]}'
+      - '{"type":"record","name":"Order","fields":[{"name":"id","type":"string"}]}'
+      - '{"type":"record","name":"Order","fields":[{"name":"id","type":"string"},{"name":"amount","type":"long"}]}'

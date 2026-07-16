@@ -1,0 +1,49 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: sample-secure-cluster
+  namespace: monedula-system
+spec:
+  bootstrapServers: kafka-bootstrap.kafka.svc:9093
+  tls:
+    enabled: true
+  # OAUTHBEARER: OIDC client-credentials flow (spec §4.5). The client fetches
+  # bearer tokens from tokenEndpoint using clientId/clientSecret; both are
+  # resolved from a Secret at connect time (shape-only here — no live lookup
+  # during `validate`).
+  auth:
+    mechanism: OAUTHBEARER
+    oauth:
+      tokenEndpoint: https://idp.example.com/oauth2/token
+      clientId:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-oauth-credentials
+            key: client-id
+      clientSecret:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-oauth-credentials
+            key: client-secret
+      scope: kafka
+  schemaRegistry:
+    endpoint: https://schema-registry.kafka.svc:8081
+  defaults:
+    replicationFactor: 3
+    # topicDeletionPolicy is now applied (spec §4.7): topics that omit
+    # spec.deletionPolicy inherit this cluster default.
+    topicDeletionPolicy: Orphan
+  # Tenancy (spec §20.2): restrict which namespaces may reference this cluster
+  # and which topic-name prefixes those namespaces may manage. Enforced
+  # terminally by the operator (TenancyDenied); the CLI does NOT enforce, so
+  # these are shape-only at `validate` time.
+  tenancy:
+    allowedNamespaces:
+      - team-payments
+      - team-payments-*
+    topicPrefixes:
+      - namespaces:
+          - team-payments
+          - team-payments-*
+        prefixes:
+          - payments.

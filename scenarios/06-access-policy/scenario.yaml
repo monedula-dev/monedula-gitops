@@ -1,0 +1,4 @@
+title: Standalone access policy
+modes: [cli, k8s]
+cluster: shared-sasl
+summary: Apply a KafkaAccessPolicy granting a billing service access to a transactional-ID resource and a consumer group.

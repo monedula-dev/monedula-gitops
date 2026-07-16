@@ -1,0 +1,35 @@
+cluster: prod-eu
+kind: ApplyResult
+results:
+- action: UpdateTopicConfig
+  field: config.retention.ms
+  from: "86400000"
+  kind: KafkaTopic
+  name: orders
+  risk: Low
+  status: Succeeded
+  target: payments.orders
+  to: "604800000"
+- action: IncreasePartitions
+  field: partitions
+  from: "3"
+  kind: KafkaTopic
+  name: orders
+  risk: Medium
+  status: Blocked
+  target: payments.orders
+  to: "6"
+- action: UpdateTopicConfig
+  field: config.retention.ms
+  from: "86400000"
+  kind: KafkaTopic
+  mode: DetectOnly
+  name: refunds
+  risk: Low
+  status: ReportOnly
+  target: payments.refunds
+  to: "604800000"
+summary:
+  Blocked: 1
+  ReportOnly: 1
+  Succeeded: 1

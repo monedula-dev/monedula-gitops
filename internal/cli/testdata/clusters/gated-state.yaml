@@ -1,0 +1,5 @@
+topics:
+  - name: payments.orders
+    partitions: 3
+    config:
+      retention.ms: "604800000"

@@ -1,0 +1,30 @@
+changes:
+- action: UpdateTopicConfig
+  field: config.retention.ms
+  from: "86400000"
+  kind: KafkaTopic
+  name: orders
+  namespace: payments
+  requiresApproval: false
+  risk: Low
+  target: payments.orders
+  to: "604800000"
+- action: CreateAcl
+  kind: KafkaTopic
+  name: orders
+  requiresApproval: false
+  risk: Low
+  target: User:svc-checkout Write topic:payments.orders Allow
+- action: UpdateTopicConfig
+  field: config.retention.ms
+  from: "86400000"
+  kind: KafkaTopic
+  mode: DetectOnly
+  name: refunds
+  namespace: payments
+  requiresApproval: false
+  risk: Low
+  target: payments.refunds
+  to: "604800000"
+cluster: prod-eu
+kind: ApplyDryRunOutput

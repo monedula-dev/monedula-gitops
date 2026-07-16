@@ -1,0 +1,16 @@
+# Self-signed Issuer for the webhook serving certificate.
+# cert-manager uses this Issuer to sign the Certificate in certificate.yaml.
+# A self-signed Issuer is appropriate here because the CA bundle is injected
+# directly into the ValidatingWebhookConfiguration by cert-manager's CA injector
+# (the cert-manager.io/inject-ca-from annotation), so the API server always has
+# the correct CA regardless of rotation.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: monedula-gitops-selfsigned-issuer
+  namespace: monedula-system
+  labels:
+    app.kubernetes.io/name: monedula-gitops
+    app.kubernetes.io/component: operator
+spec:
+  selfSigned: {}

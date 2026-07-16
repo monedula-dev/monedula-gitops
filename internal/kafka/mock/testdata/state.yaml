@@ -1,0 +1,26 @@
+topics:
+  - name: payments.orders
+    partitions: 12
+    replicationFactor: 3
+    config:
+      retention.ms: "86400000"
+      cleanup.policy: delete
+  - name: analytics.events
+    partitions: 6
+    replicationFactor: 3
+    config:
+      retention.ms: "604800000"
+acls:
+  - { principal: "User:svc-checkout", host: "*", resourceType: topic, resourceName: payments.orders, patternType: literal, operation: Write, permission: Allow }
+quotas:
+  - entity:
+      - type: user
+        name: svc-checkout
+      - type: client-id
+        name: batch
+    limits:
+      producer_byte_rate: 1048576
+scramCredentials:
+  - user: svc-checkout
+    mechanism: SCRAM-SHA-512
+    iterations: 4096

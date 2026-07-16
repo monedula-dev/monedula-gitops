@@ -1,0 +1,8 @@
+# Mechanism-change state: the declared user exists ONLY under the other
+# mechanism (SCRAM-SHA-256; the manifest declares SCRAM-SHA-512).
+topics: []
+acls: []
+scramCredentials:
+  - user: svc-payments
+    mechanism: SCRAM-SHA-256
+    iterations: 8192

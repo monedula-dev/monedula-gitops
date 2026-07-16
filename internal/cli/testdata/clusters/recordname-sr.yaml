@@ -1,0 +1,4 @@
+# Empty Schema Registry state: the RecordName-strategy value subject
+# "payments.Order" (the schema's record full name) is absent -> RegisterSchema
+# drift targeting that subject (NOT "payments.orders-value").
+subjects: []

@@ -1,0 +1,3 @@
+topics:
+  - name: payments.orders
+    partitions: 1

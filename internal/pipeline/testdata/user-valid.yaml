@@ -1,0 +1,11 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaUser
+metadata:
+  name: svc-checkout
+spec:
+  clusterRef:
+    name: prod
+  mechanism: SCRAM-SHA-512
+  password:
+    valueFrom:
+      env: SVC_CHECKOUT_PASSWORD

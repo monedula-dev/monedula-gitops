@@ -1,0 +1,115 @@
+# Monedula e2e scenario cluster: single-node Kafka (KRaft) with SASL_PLAINTEXT / OAUTHBEARER.
+# DEV ONLY — a mock OIDC server (navikt/mock-oauth2-server) issues + validates tokens.
+services:
+  mock-oauth2:
+    image: ghcr.io/navikt/mock-oauth2-server:2.1.10
+    hostname: mock-oauth2
+    container_name: monedula-oauth-mock
+    ports:
+      - "8080:8080"
+    environment:
+      # SERVER_HOSTNAME causes the server to bind to this hostname (not 0.0.0.0).
+      # The issuer URL in tokens is DYNAMIC: it reflects the Host header of each
+      # request. Host-side requests (localhost:8080) yield iss=http://localhost:8080/default;
+      # in-network requests (mock-oauth2:8080) yield iss=http://mock-oauth2:8080/default.
+      # KAFKA_SASL_OAUTHBEARER_EXPECTED_ISSUER is set to match the host-side issuer
+      # since the CLI (running on the host) fetches tokens from localhost:8080.
+      SERVER_HOSTNAME: "mock-oauth2"
+      SERVER_PORT: "8080"
+    volumes:
+      # Mount the tiny Java readiness probe (distroless image has no shell or curl).
+      - ./healthcheck.java:/health/healthcheck.java:ro
+    healthcheck:
+      # navikt/mock-oauth2-server is a distroless JVM image — no /bin/sh available.
+      # We use java --source 11 to run a tiny HTTP-GET probe instead of CMD-SHELL.
+      test: ["CMD", "java", "--source", "11", "/health/healthcheck.java"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
+
+  kafka:
+    image: confluentinc/cp-kafka:8.0.0
+    hostname: kafka
+    container_name: monedula-oauth-kafka
+    depends_on:
+      mock-oauth2:
+        condition: service_healthy
+    ports:
+      - "9092:9092"
+      - "9098:9098"
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      CLUSTER_ID: "4L6g3nShT-eMCtK--X86sw"
+      # Listener name must NOT contain underscores: cp-kafka's env→property
+      # conversion maps single '_' to '.', so CLIENT_HOST becomes
+      # client.host instead of client_host, breaking listener-specific configs.
+      # Use CLIENTHOST (no underscore) so KAFKA_LISTENER_NAME_CLIENTHOST_* maps
+      # correctly to listener.name.clienthost.* in kafka.properties.
+      KAFKA_LISTENERS: "CONTROLLER://:9093,INTERNAL://:9094,CLIENTHOST://:9092,CLIENTKIND://:9098"
+      KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka:9094,CLIENTHOST://localhost:9092,CLIENTKIND://host.docker.internal:9098"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,CLIENTHOST:SASL_PLAINTEXT,CLIENTKIND:SASL_PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+      KAFKA_SASL_ENABLED_MECHANISMS: "OAUTHBEARER"
+      # Broker-side JAAS that enables the OAUTHBEARER mechanism on CLIENTHOST.
+      # cp-kafka 8.x requires KAFKA_OPTS for JAAS; the per-listener env-var form
+      # does not work reliably. See config/kafka-jaas.conf.
+      # Apache Kafka 3.7+ (cp-kafka 8.x) requires HTTP URLs to be explicitly
+      # allowlisted for OAUTHBEARER JWKS fetching (DEV ONLY: production should use HTTPS).
+      KAFKA_OPTS: >-
+        -Djava.security.auth.login.config=/etc/kafka/secrets/kafka-jaas.conf
+        -Dorg.apache.kafka.sasl.oauthbearer.allowed.urls=http://mock-oauth2:8080/default/jwks
+      # Listener-specific server callback handler for JWKS token validation.
+      # cp-kafka 8.x uses the top-level class (not the older .secured. subpackage).
+      # CLIENTHOST inherits the global EXPECTED_ISSUER / EXPECTED_AUDIENCE
+      # (localhost issuer) — no per-listener override needed. CLIENTKIND below
+      # overrides the issuer per-listener to the host.docker.internal value.
+      KAFKA_LISTENER_NAME_CLIENTHOST_OAUTHBEARER_SASL_SERVER_CALLBACK_HANDLER_CLASS: "org.apache.kafka.common.security.oauthbearer.OAuthBearerValidatorCallbackHandler"
+      # Token validator: fetch JWKS from the mock OIDC server (in-network URL,
+      # reachable from the broker). The expected issuer must match what the
+      # client receives in the token's `iss` claim — navikt/mock-oauth2-server
+      # reflects the request Host, so a host-side token endpoint call
+      # (http://localhost:8080/default/token) yields iss=http://localhost:8080/default.
+      # The expected audience must match the token's `aud` claim. The mock server
+      # sets aud=<scope> so aud=kafka when scope=kafka is requested.
+      KAFKA_SASL_OAUTHBEARER_JWKS_ENDPOINT_URL: "http://mock-oauth2:8080/default/jwks"
+      KAFKA_SASL_OAUTHBEARER_EXPECTED_ISSUER: "http://localhost:8080/default"
+      KAFKA_SASL_OAUTHBEARER_EXPECTED_AUDIENCE: "kafka"
+      # in-kind operator-facing listener CLIENTKIND. The operator
+      # (running inside kind) reaches the broker and the mock OIDC server via
+      # host.docker.internal, so the token it fetches carries
+      # iss=http://host.docker.internal:8080/default. This per-listener expected-issuer
+      # override accepts that issuer on CLIENTKIND, while CLIENTHOST keeps the global
+      # localhost issuer so the host-side CLI is unaffected.
+      # CLIENTKIND mirrors CLIENTHOST's OAUTHBEARER setup. The global
+      # KAFKA_SASL_ENABLED_MECHANISMS already enables OAUTHBEARER on every SASL
+      # listener (so CLIENTHOST needs no per-listener key); this explicit
+      # per-listener key is harmless belt-and-suspenders for the kind listener.
+      KAFKA_LISTENER_NAME_CLIENTKIND_SASL_ENABLED_MECHANISMS: "OAUTHBEARER"
+      KAFKA_LISTENER_NAME_CLIENTKIND_OAUTHBEARER_SASL_SERVER_CALLBACK_HANDLER_CLASS: "org.apache.kafka.common.security.oauthbearer.OAuthBearerValidatorCallbackHandler"
+      KAFKA_LISTENER_NAME_CLIENTKIND_OAUTHBEARER_SASL_OAUTHBEARER_EXPECTED_ISSUER: "http://host.docker.internal:8080/default"
+      KAFKA_LISTENER_NAME_CLIENTKIND_OAUTHBEARER_SASL_OAUTHBEARER_EXPECTED_AUDIENCE: "kafka"
+      KAFKA_LISTENER_NAME_CLIENTKIND_OAUTHBEARER_SASL_OAUTHBEARER_JWKS_ENDPOINT_URL: "http://mock-oauth2:8080/default/jwks"
+      KAFKA_AUTHORIZER_CLASS_NAME: "org.apache.kafka.metadata.authorizer.StandardAuthorizer"
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "true"
+      KAFKA_SUPER_USERS: "User:monedula"   # token sub=monedula (validated in spike)
+      KAFKA_DEFAULT_REPLICATION_FACTOR: "1"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+      - ./config/kafka-jaas.conf:/etc/kafka/secrets/kafka-jaas.conf:ro
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "kafka:9094"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+
+volumes:
+  kafka-data:

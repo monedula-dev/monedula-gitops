@@ -1,0 +1,137 @@
+{{- if and .Values.extraVolumeMounts (not .Values.extraVolumes) }}
+{{- fail "extraVolumeMounts is set but extraVolumes is empty — each extra volumeMount needs a matching entry in extraVolumes" }}
+{{- end }}
+{{- if and .Values.maxConcurrentReconciles (gt (int .Values.maxConcurrentReconciles) 1) (not .Values.leaderElection.enabled) }}
+{{- fail "maxConcurrentReconciles > 1 requires leaderElection.enabled=true — concurrent reconciles rely on the operator's in-process locking, and a second active replica would race it; enable leader election or keep maxConcurrentReconciles at 1" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "monedula-gitops.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "monedula-gitops.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "monedula-gitops.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "monedula-gitops.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}{{- toYaml . | nindent 8 }}{{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "monedula-gitops.serviceAccountName" . }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      containers:
+      - name: manager
+        image: {{ include "monedula-gitops.image" . }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        args:
+        - operator
+        - --metrics-bind-address=:{{ .Values.metrics.service.port }}
+        {{- if .Values.metrics.secure }}
+        - --metrics-secure
+        {{- end }}
+        - --health-probe-bind-address=:8081
+        - --log-level={{ .Values.logLevel }}
+        {{- if .Values.leaderElection.enabled }}
+        - --leader-elect
+        {{- end }}
+        {{- with .Values.clusterNamespace }}
+        - --cluster-namespace={{ . }}
+        {{- end }}
+        {{- with .Values.resyncInterval }}
+        - --resync-interval={{ . }}
+        {{- end }}
+        {{- with .Values.maxConcurrentReconciles }}
+        - --max-concurrent-reconciles={{ . }}
+        {{- end }}
+        {{- if .Values.webhook.enabled }}
+        - --enable-webhooks
+        - --webhook-cert-dir=/tmp/k8s-webhook-server/serving-certs
+        {{- end }}
+        {{- with .Values.extraArgs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with .Values.extraEnv }}
+        env:
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        ports:
+        - name: metrics
+          containerPort: {{ .Values.metrics.service.port }}
+          protocol: TCP
+        - name: health
+          containerPort: 8081
+          protocol: TCP
+        {{- if .Values.webhook.enabled }}
+        - name: webhook
+          containerPort: 9443
+          protocol: TCP
+        {{- end }}
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: health
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+        securityContext:
+          {{- toYaml .Values.securityContext | nindent 10 }}
+        {{- if or .Values.webhook.enabled .Values.extraVolumeMounts }}
+        volumeMounts:
+        {{- if .Values.webhook.enabled }}
+        - name: webhook-serving-cert
+          mountPath: /tmp/k8s-webhook-server/serving-certs
+          readOnly: true
+        {{- end }}
+        {{- with .Values.extraVolumeMounts }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- end }}
+      {{- if or .Values.webhook.enabled .Values.extraVolumes }}
+      volumes:
+      {{- if .Values.webhook.enabled }}
+      - name: webhook-serving-cert
+        secret:
+          secretName: {{ include "monedula-gitops.webhookCertSecret" . }}
+          defaultMode: 0444
+      {{- end }}
+      {{- with .Values.extraVolumes }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 10

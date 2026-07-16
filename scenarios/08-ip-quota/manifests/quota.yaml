@@ -1,0 +1,11 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaQuota
+metadata:
+  name: ip-quota
+spec:
+  clusterRef:
+    name: shared
+  entity:
+    ip: "10.0.0.7"
+  limits:
+    connectionCreationRate: 100

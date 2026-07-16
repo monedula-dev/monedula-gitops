@@ -1,0 +1,3 @@
+# Empty Schema Registry state: no subjects registered, so the desired value
+# subject "payments.orders-value" is absent -> RegisterSchema drift.
+subjects: []

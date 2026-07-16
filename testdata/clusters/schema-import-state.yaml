@@ -1,0 +1,5 @@
+# Live Kafka state for the schema-import round-trip test: one topic that has a
+# matching value subject in the Schema Registry (schema-import-sr.yaml).
+topics:
+  - name: payments.orders
+    partitions: 1

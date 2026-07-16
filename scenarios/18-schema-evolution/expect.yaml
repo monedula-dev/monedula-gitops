@@ -1,0 +1,9 @@
+steps:
+  - run: apply
+    expect: { exitCode: 0 }
+  - run: apply
+    manifests: manifests-v2
+    expect: { exitCode: 0 }
+  - run: apply
+    manifests: manifests-bad
+    expect: { exitCode: 2, outputContains: ["compat"] }

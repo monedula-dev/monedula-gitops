@@ -1,0 +1,4 @@
+title: mTLS client-cert auth
+modes: [cli, k8s]
+cluster: auth-mtls
+summary: Connect to the broker with mutual TLS (client certificate) and apply a topic, verifying it lands on the broker.

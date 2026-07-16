@@ -1,0 +1,11 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: cg
+  annotations:
+    gitops.monedula.dev/mock-state-file: custom-governance-state.yaml
+    gitops.monedula.dev/mock-schema-file: custom-governance-sr.yaml
+spec:
+  bootstrapServers: localhost:9092
+  schemaRegistry:
+    endpoint: http://sr

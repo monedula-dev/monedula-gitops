@@ -1,0 +1,31 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaAccessPolicy
+metadata:
+  name: sample-access-policy
+  namespace: monedula-system
+spec:
+  clusterRef:
+    name: sample-cluster
+  rules:
+  - principal: User:orders-service
+    permission: Allow
+    host: "*"
+    resource:
+      type: topic
+      name: orders.events
+      patternType: literal
+    operations:
+    - Write
+    - Describe
+  - principal: User:billing-service
+    permission: Allow
+    host: "*"
+    resource:
+      type: group
+      name: billing-consumers
+      patternType: literal
+    operations:
+    - Read
+  reconciliation:
+    mode: Enforce
+  deletionPolicy: Delete

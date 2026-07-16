@@ -1,0 +1,12 @@
+Cluster: prod-eu
+Topics: 2
+Topic access rules: 2
+Access policies: 1
+Policy rules: 1
+Schemas: 0
+Quotas: 0
+Role bindings: 0
+Users: 0
+RecordName subjects: 0
+Warnings:
+  principal "User:x" has ambiguous consumer group mapping

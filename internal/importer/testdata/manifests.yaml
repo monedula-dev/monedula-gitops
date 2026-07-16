@@ -1,0 +1,61 @@
+---
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaTopic
+metadata:
+  annotations:
+    gitops.monedula.dev/imported-from-cluster: prod-eu
+  name: events
+  namespace: analytics
+spec:
+  clusterRef:
+    name: prod-eu
+  deletionPolicy: Orphan
+  partitions: 3
+  topicName: analytics.events
+---
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaTopic
+metadata:
+  annotations:
+    gitops.monedula.dev/imported-from-cluster: prod-eu
+  name: orders
+  namespace: payments
+spec:
+  access:
+    consumers:
+    - group: reporting
+      principal: User:svc-reporting
+    producers:
+    - principal: User:svc-checkout
+  clusterRef:
+    name: prod-eu
+  config:
+    cleanup.policy: delete
+    retention.ms: "604800000"
+  deletionPolicy: Orphan
+  partitions: 6
+  replicationFactor: 3
+  topicName: payments.orders
+---
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaAccessPolicy
+metadata:
+  annotations:
+    gitops.monedula.dev/imported-from-cluster: prod-eu
+  name: imported-user-admin
+  namespace: platform
+spec:
+  clusterRef:
+    name: prod-eu
+  deletionPolicy: Delete
+  rules:
+  - host: '*'
+    operations:
+    - Alter
+    - Describe
+    permission: Allow
+    principal: User:admin
+    resource:
+      name: kafka-cluster
+      patternType: literal
+      type: cluster

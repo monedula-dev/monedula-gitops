@@ -1,0 +1,4 @@
+title: Topic deletion — Delete policy with approval
+modes: [k8s]
+cluster: shared-sasl
+summary: A KafkaTopic with deletionPolicy Delete plus the allow-delete approval annotation; deleting the CR removes the Kafka topic from the broker.

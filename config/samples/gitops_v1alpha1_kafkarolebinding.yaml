@@ -1,0 +1,34 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaRoleBinding
+metadata:
+  name: checkout-writer
+  namespace: team-payments
+spec:
+  clusterRef:
+    name: sample-cluster
+  principal: User:svc-checkout
+  role: DeveloperWrite
+  scope:
+    type: kafka
+  resources:
+    - type: Topic
+      name: payments.orders
+      patternType: literal
+  reconciliation:
+    mode: Enforce
+---
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaRoleBinding
+metadata:
+  name: cluster-operator
+  namespace: team-payments
+spec:
+  clusterRef:
+    name: sample-cluster
+  principal: User:svc-operator
+  role: Operator
+  scope:
+    type: kafka
+  # No resources: cluster-scoped roles bind to the whole scope (no resource patterns).
+  reconciliation:
+    mode: Enforce

@@ -1,0 +1,19 @@
+cli:
+  apply:
+    exitCode: 0
+k8s:
+  conditions:
+    - kind: KafkaQuota
+      name: ip-quota
+      type: Ready
+      status: "True"
+    - kind: KafkaQuota
+      name: ip-quota
+      type: QuotaSynced
+      status: "True"
+liveState:
+  quotas:
+    - entity:
+        ip: "10.0.0.7"
+      limits:
+        connection_creation_rate: 100

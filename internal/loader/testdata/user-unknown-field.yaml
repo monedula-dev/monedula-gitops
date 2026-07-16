@@ -1,0 +1,13 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaUser
+metadata:
+  name: svc-checkout
+spec:
+  clusterRef:
+    name: prod
+  usernme: "svc-checkout"
+  password:
+    valueFrom:
+      secretKeyRef:
+        name: svc-checkout-credentials
+        key: password

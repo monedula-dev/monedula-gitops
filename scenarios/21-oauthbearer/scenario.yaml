@@ -1,0 +1,4 @@
+title: OAUTHBEARER token auth
+modes: [cli, k8s]
+cluster: auth-oauth
+summary: Authenticate to the broker with an OIDC client-credentials bearer token and apply a topic, verifying it lands on the broker.

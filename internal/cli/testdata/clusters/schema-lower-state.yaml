@@ -1,0 +1,6 @@
+# Kafka mock state matching the manifest (topic payments.orders, 1 partition)
+# so there is NO kafka drift; the only drift is the schema compatibility
+# lowering (FULL -> BACKWARD) seeded in schema-lower-sr.yaml.
+topics:
+  - name: payments.orders
+    partitions: 1

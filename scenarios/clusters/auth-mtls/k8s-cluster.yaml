@@ -1,0 +1,33 @@
+# k8s-shaped KafkaCluster CR for the auth-mtls profile (operator mode).
+# The in-kind operator connects to the host compose broker as
+# host.docker.internal:9097 (the CLIENTKIND SSL listener). Client cert/key and
+# the CA come from the kafka-mtls Secret created by setup_auth_profile: the
+# operator verifies the broker cert via tls.caCert (a secretKeyRef), just as
+# CLI mode verifies it via a file ref.
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: shared
+  labels:
+    app.kubernetes.io/part-of: monedula-e2e
+spec:
+  bootstrapServers: host.docker.internal:9097
+  tls:
+    enabled: true
+    caCert:
+      valueFrom:
+        secretKeyRef:
+          name: kafka-mtls
+          key: ca.crt
+    clientCert:
+      valueFrom:
+        secretKeyRef:
+          name: kafka-mtls
+          key: client.crt
+    clientKey:
+      valueFrom:
+        secretKeyRef:
+          name: kafka-mtls
+          key: client.key
+  auth:
+    mechanism: mTLS

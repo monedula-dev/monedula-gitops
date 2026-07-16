@@ -1,0 +1,28 @@
+cli:
+  apply:
+    exitCode: 0
+    outputContains: ["acl.orders"]
+k8s:
+  conditions:
+    - kind: KafkaTopic
+      name: acl-orders
+      type: Ready
+      status: "True"
+    - kind: KafkaTopic
+      name: acl-orders
+      type: TopicAccessSynced
+      status: "True"
+liveState:
+  acls:
+    - principal: "User:svc-producer"
+      operation: Write
+      resourceType: topic
+      resourceName: acl.orders
+    - principal: "User:svc-consumer"
+      operation: Read
+      resourceType: topic
+      resourceName: acl.orders
+    - principal: "User:svc-consumer"
+      operation: Read
+      resourceType: group
+      resourceName: acl-orders-cg

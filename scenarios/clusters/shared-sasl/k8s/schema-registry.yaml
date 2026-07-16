@@ -1,0 +1,169 @@
+# Monedula k8s quickstart: Schema Registry (Confluent cp-schema-registry).
+#
+# Connects to Kafka over the CLIENT listener (SASL_PLAINTEXT / SCRAM-SHA-512)
+# at kafka.kafka.svc.cluster.local:9092 using the `admin` SCRAM super user.
+# Its internal _schemas topic uses RF=1 because there is only one broker.
+#
+# REST API is protected with HTTP Basic auth (user sr / sr-secret). The realm
+# is backed by a Jetty PropertyFileLoginModule; the JAAS config + password
+# file are supplied via the ConfigMap below and mounted into the pod.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: schema-registry-auth
+  namespace: kafka
+  labels:
+    app.kubernetes.io/name: schema-registry
+    app.kubernetes.io/part-of: monedula-quickstart
+data:
+  # JAAS realm used by Schema Registry's HTTP Basic authentication.
+  # Realm name "SchemaRegistry" must match SCHEMA_REGISTRY_AUTHENTICATION_REALM.
+  schema-registry-jaas.conf: |
+    # NOTE (version-sensitive): the PropertyFileLoginModule package path depends on
+    # the Jetty version bundled in cp-schema-registry. This targets cp 8.0.0 (Jetty
+    # 12). If you downgrade to a Jetty 9.4-11 build and Basic-auth starts 401ing,
+    # swap the class:
+    #   Jetty 12+    : org.eclipse.jetty.security.jaas.spi.PropertyFileLoginModule  (used here)
+    #   Jetty 9.4-11 : org.eclipse.jetty.jaas.spi.PropertyFileLoginModule
+    SchemaRegistry {
+      org.eclipse.jetty.security.jaas.spi.PropertyFileLoginModule required
+      file="/etc/schema-registry/secrets/sr-password.properties"
+      debug="false";
+    };
+  # HTTP Basic auth users (DEMO ONLY -- fake credentials).
+  # Format:  <username>: <password>,<role>[,<role>...]
+  # The role must match SCHEMA_REGISTRY_AUTHENTICATION_ROLES (admin).
+  sr-password.properties: |
+    sr: sr-secret,admin
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: schema-registry
+  namespace: kafka
+  labels:
+    app.kubernetes.io/name: schema-registry
+    app.kubernetes.io/part-of: monedula-quickstart
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: schema-registry
+  ports:
+    - name: http
+      port: 8081
+      targetPort: 8081
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: schema-registry
+  namespace: kafka
+  labels:
+    app.kubernetes.io/name: schema-registry
+    app.kubernetes.io/part-of: monedula-quickstart
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: schema-registry
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: schema-registry
+        app.kubernetes.io/part-of: monedula-quickstart
+    spec:
+      # Prevent Kubernetes from injecting SCHEMA_REGISTRY_* env vars from the
+      # in-namespace schema-registry Service into the pod. cp-schema-registry's
+      # entrypoint interprets ALL SCHEMA_REGISTRY_* env vars as config overrides;
+      # service-injected vars like SCHEMA_REGISTRY_PORT corrupt the config.
+      enableServiceLinks: false
+      initContainers:
+        # Wait until Kafka accepts SASL/SCRAM connections on :9092, i.e. until
+        # the kafka-scram-bootstrap Job has created the `admin` SCRAM user.
+        - name: wait-for-kafka-sasl
+          image: confluentinc/cp-kafka:8.0.0
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              cat > /tmp/client.properties <<'EOF'
+              security.protocol=SASL_PLAINTEXT
+              sasl.mechanism=SCRAM-SHA-512
+              sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="admin" password="admin-secret";
+              EOF
+              echo "Waiting for Kafka SASL on :9092 (admin SCRAM user)..."
+              until kafka-broker-api-versions \
+                  --bootstrap-server kafka.kafka.svc.cluster.local:9092 \
+                  --command-config /tmp/client.properties >/dev/null 2>&1; do
+                echo "  kafka SASL not ready yet, retrying in 5s"
+                sleep 5
+              done
+              echo "Kafka SASL is ready."
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+      containers:
+        - name: schema-registry
+          image: confluentinc/cp-schema-registry:8.0.0
+          ports:
+            - name: http
+              containerPort: 8081
+          env:
+            - name: SCHEMA_REGISTRY_HOST_NAME
+              value: "schema-registry"
+            - name: SCHEMA_REGISTRY_LISTENERS
+              value: "http://0.0.0.0:8081"
+
+            # --- Connect to Kafka over the SASL CLIENT listener (:9092) ---
+            - name: SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS
+              value: "SASL_PLAINTEXT://kafka.kafka.svc.cluster.local:9092"
+            - name: SCHEMA_REGISTRY_KAFKASTORE_SECURITY_PROTOCOL
+              value: "SASL_PLAINTEXT"
+            - name: SCHEMA_REGISTRY_KAFKASTORE_SASL_MECHANISM
+              value: "SCRAM-SHA-512"
+            - name: SCHEMA_REGISTRY_KAFKASTORE_SASL_JAAS_CONFIG
+              value: 'org.apache.kafka.common.security.scram.ScramLoginModule required username="admin" password="admin-secret";'
+            # Single broker: SR's internal _schemas topic must use RF=1 (default 3).
+            - name: SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR
+              value: "1"
+
+            # --- HTTP Basic auth on the REST API (realm backed by a JAAS file) ---
+            - name: SCHEMA_REGISTRY_AUTHENTICATION_METHOD
+              value: "BASIC"
+            - name: SCHEMA_REGISTRY_AUTHENTICATION_REALM
+              value: "SchemaRegistry"
+            - name: SCHEMA_REGISTRY_AUTHENTICATION_ROLES
+              value: "admin"
+            - name: SCHEMA_REGISTRY_OPTS
+              value: "-Djava.security.auth.login.config=/etc/schema-registry/secrets/schema-registry-jaas.conf"
+          volumeMounts:
+            - name: sr-auth
+              mountPath: /etc/schema-registry/secrets
+              readOnly: true
+          readinessProbe:
+            tcpSocket:
+              port: 8081
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: sr-auth
+          configMap:
+            name: schema-registry-auth
+            items:
+              - key: schema-registry-jaas.conf
+                path: schema-registry-jaas.conf
+              - key: sr-password.properties
+                path: sr-password.properties

@@ -1,0 +1,11 @@
+topics: []
+acls: []
+quotas:
+  - entity:
+      - type: user
+        name: svc-checkout
+      - type: client-id
+        name: batch
+    limits:
+      producer_byte_rate: 1048576
+      consumer_byte_rate: 2097152

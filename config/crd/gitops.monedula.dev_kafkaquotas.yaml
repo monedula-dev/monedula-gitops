@@ -1,0 +1,268 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  name: kafkaquotas.gitops.monedula.dev
+spec:
+  group: gitops.monedula.dev
+  names:
+    kind: KafkaQuota
+    listKind: KafkaQuotaList
+    plural: kafkaquotas
+    singular: kafkaquota
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.clusterRef.name
+      name: Cluster
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              KafkaQuotaSpec carries CEL transition rules enforcing entity and clusterRef
+              immutability at the apiserver (always on, webhooks or not): changing the
+              entity orphans the previous entity's quota (a delete + create of a
+              different Kafka quota entity), and repointing clusterRef orphans the quota
+              on the previous cluster. CEL object equality compares the whole entity
+              block field-wise, mirroring the webhook's resolved-entity-key comparison
+              (all components are scalars).
+            properties:
+              clusterRef:
+                properties:
+                  name:
+                    type: string
+                required:
+                - name
+                type: object
+              entity:
+                description: |-
+                  QuotaEntity identifies a Kafka quota target. It is either an ip dimension
+                  (ip or ipDefault) OR a user/client-id dimension — never both. A specific name
+                  XOR its per-type default; at least one component required (spec §39.2).
+                properties:
+                  clientId:
+                    description: ClientId is a specific client-id. Mutually exclusive
+                      with clientIdDefault.
+                    type: string
+                  clientIdDefault:
+                    description: ClientIdDefault targets the client-id-default entity
+                      (Kafka null name).
+                    type: boolean
+                  ip:
+                    description: |-
+                      Ip targets a Kafka ip quota entity by a single IPv4/IPv6 literal. It is a
+                      SEPARATE quota dimension: mutually exclusive with ipDefault AND with every
+                      user/client-id component (an entity is either ip or user/client-id, never
+                      both). Validated as a net.ParseIP literal (no CIDR/hostname). (spec §39.2)
+                    type: string
+                  ipDefault:
+                    description: IpDefault targets the ip-default entity (Kafka null
+                      name).
+                    type: boolean
+                  user:
+                    description: |-
+                      User in KafkaPrincipal form "User:<name>" (the "User:" prefix is stripped
+                      for Kafka's quota API). Mutually exclusive with userDefault.
+                    type: string
+                  userDefault:
+                    description: UserDefault targets the user-default entity (Kafka
+                      null name).
+                    type: boolean
+                type: object
+              limits:
+                description: |-
+                  QuotaLimits are the five Kafka quota value keys. At least one required;
+                  authoritative for the entity (an unset dimension present live is removed).
+                properties:
+                  connectionCreationRate:
+                    description: |-
+                      ConnectionCreationRate caps new connections/second. It is valid ONLY on an
+                      ip entity (and is the only limit valid there); rejected on user/client-id
+                      entities (spec §39.3).
+                    minimum: 0
+                    type: number
+                  consumerByteRate:
+                    description: ConsumerByteRate caps fetch throughput in bytes/second.
+                    minimum: 0
+                    type: number
+                  controllerMutationRate:
+                    description: ControllerMutationRate caps the create/delete topic+partition
+                      mutation rate (mutations/second).
+                    minimum: 0
+                    type: number
+                  producerByteRate:
+                    description: ProducerByteRate caps produce throughput in bytes/second.
+                    minimum: 0
+                    type: number
+                  requestPercentage:
+                    description: RequestPercentage caps broker request-handler time
+                      as a percent (may exceed 100 on multi-core brokers).
+                    minimum: 0
+                    type: number
+                type: object
+              reconciliation:
+                properties:
+                  mode:
+                    enum:
+                    - Enforce
+                    - DetectOnly
+                    - ObserveOnly
+                    type: string
+                type: object
+            required:
+            - clusterRef
+            - entity
+            - limits
+            type: object
+            x-kubernetes-validations:
+            - message: spec.entity is immutable (changing it orphans the previous
+                entity's quota)
+              rule: self.entity == oldSelf.entity
+            - message: spec.clusterRef.name is immutable (repointing a quota orphans
+                the previous cluster's quota)
+              rule: self.clusterRef.name == oldSelf.clusterRef.name
+          status:
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              drift:
+                properties:
+                  detected:
+                    type: boolean
+                  fields:
+                    items:
+                      type: string
+                    type: array
+                required:
+                - detected
+                type: object
+              lastAppliedTime:
+                format: date-time
+                type: string
+              lastCheckedTime:
+                format: date-time
+                type: string
+              observedGeneration:
+                format: int64
+                type: integer
+              observedLimits:
+                description: |-
+                  QuotaLimits are the five Kafka quota value keys. At least one required;
+                  authoritative for the entity (an unset dimension present live is removed).
+                properties:
+                  connectionCreationRate:
+                    description: |-
+                      ConnectionCreationRate caps new connections/second. It is valid ONLY on an
+                      ip entity (and is the only limit valid there); rejected on user/client-id
+                      entities (spec §39.3).
+                    minimum: 0
+                    type: number
+                  consumerByteRate:
+                    description: ConsumerByteRate caps fetch throughput in bytes/second.
+                    minimum: 0
+                    type: number
+                  controllerMutationRate:
+                    description: ControllerMutationRate caps the create/delete topic+partition
+                      mutation rate (mutations/second).
+                    minimum: 0
+                    type: number
+                  producerByteRate:
+                    description: ProducerByteRate caps produce throughput in bytes/second.
+                    minimum: 0
+                    type: number
+                  requestPercentage:
+                    description: RequestPercentage caps broker request-handler time
+                      as a percent (may exceed 100 on multi-core brokers).
+                    minimum: 0
+                    type: number
+                type: object
+              phase:
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

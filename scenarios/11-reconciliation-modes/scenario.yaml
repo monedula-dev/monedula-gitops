@@ -1,0 +1,4 @@
+title: ObserveOnly reconciliation mode
+modes: [cli]
+cluster: shared-sasl
+summary: A topic with reconciliation.mode ObserveOnly reports drift informally but never causes verify to exit 1 and never has its config overwritten by apply — useful for read-only audit without enforcement.

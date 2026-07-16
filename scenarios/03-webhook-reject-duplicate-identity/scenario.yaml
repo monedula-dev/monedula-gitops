@@ -1,0 +1,4 @@
+title: Admission webhook rejects a duplicate topic identity
+modes: [k8s]
+cluster: shared-sasl
+summary: The validating webhook blocks a second KafkaTopic that claims the same (cluster, topicName) identity as an existing one.

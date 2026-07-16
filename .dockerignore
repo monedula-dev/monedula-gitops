@@ -1,0 +1,13 @@
+# Keep the build context small and reproducible.
+.git
+bin/
+dist/
+/monedula-gitops
+quickstart/
+docs/
+config/
+*.out
+.idea/
+.DS_Store
+# test fixtures/artifacts not needed to build the binary
+**/testdata/

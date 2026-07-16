@@ -1,0 +1,8 @@
+# The manifest's schema (./testdata/superseded/orders-value.avsc) is registered
+# as v1, but a NEWER v2 was registered out-of-band: spec §12.1 supersession.
+subjects:
+  - subject: payments.sup-value
+    type: AVRO
+    versions:
+      - '{"type":"record","name":"Sup","fields":[]}'
+      - '{"type":"record","name":"Sup","fields":[{"name":"id","type":"string"}]}'

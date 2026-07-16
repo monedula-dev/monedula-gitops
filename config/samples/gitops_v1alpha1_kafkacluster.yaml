@@ -1,0 +1,46 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: sample-cluster
+  namespace: monedula-system
+spec:
+  bootstrapServers: kafka-bootstrap.kafka.svc:9093
+  tls:
+    enabled: true
+  auth:
+    mechanism: SCRAM-SHA-512
+    scram:
+      username:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-admin-credentials
+            key: username
+      password:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-admin-credentials
+            key: password
+  defaults:
+    replicationFactor: 3
+    topicDeletionPolicy: Orphan
+  # authorization.mds enables Confluent RBAC role-binding management (spec §40).
+  # The MDS endpoint is the Confluent metadata service REST API; clusters.kafkaCluster
+  # is the Kafka logical-cluster ID used as the base scope for all role bindings.
+  authorization:
+    mds:
+      endpoint: https://kafka-mds.kafka.svc:8090
+      auth:
+        type: basic
+        username:
+          valueFrom:
+            secretKeyRef:
+              name: kafka-admin-credentials
+              key: username
+        password:
+          valueFrom:
+            secretKeyRef:
+              name: kafka-admin-credentials
+              key: password
+      clusters:
+        kafkaCluster: lkc-abc123
+        schemaRegistryCluster: lsrc-xyz789

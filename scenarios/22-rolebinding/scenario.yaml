@@ -1,0 +1,4 @@
+title: RBAC role binding via MDS
+modes: [cli, k8s]
+cluster: auth-mds
+summary: Apply a KafkaRoleBinding and have it created on the real Metadata Service (MDS), then verify it is in sync.

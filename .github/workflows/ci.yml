@@ -1,0 +1,67 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - run: go build ./...
+      - run: go vet ./...
+      - run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      # The release pipeline runs `go mod tidy` as a pre-hook, so an untidy
+      # go.mod dirties the tree mid-release; catch it here instead.
+      - name: go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+      # go>=1.26 gofmt rewrites paired apostrophes in doc comments into curly
+      # quotes, corrupting CEL rules; see the guard comment in types.go.
+      - name: forbid CEL empty-string literals in types.go
+        run: |
+          if grep -n "== ''" internal/api/v1alpha1/types.go; then
+            echo "CEL empty-string literal reintroduced — see the guard comment in internal/api/v1alpha1/types.go (use .size() == 0)"
+            exit 1
+          fi
+      # -race roughly 2-3x's runtime (acceptance suite alone is ~205s unraced);
+      # no explicit timeout-minutes is set, so this runs under the GitHub-hosted
+      # default job timeout (6h) with plenty of headroom.
+      - run: go test -race ./...
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      # golangci-lint v2 requires action v7; v6 only supports the v1 line.
+      - uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.12.2
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.0
+      - run: helm lint charts/monedula-gitops
+  goreleaser-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: '~> v2'
+          args: check

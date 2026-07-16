@@ -1,0 +1,12 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaRoleBinding
+metadata:
+  name: alice-developer
+  namespace: payments
+spec:
+  clusterRef:
+    name: prod
+  principal: "User:alice"
+  role: DeveloperRead
+  scope:
+    type: kafka

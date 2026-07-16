@@ -1,0 +1,56 @@
+version: 2
+project_name: monedula-gitops
+before:
+  hooks:
+    - go mod tidy
+builds:
+  - id: monedula-gitops
+    main: ./cmd/monedula-gitops
+    binary: monedula-gitops
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+archives:
+  - id: default
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+checksum:
+  name_template: "checksums.txt"
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude: ["^docs:", "^test:", "^chore:", "Merge "]
+release:
+  github:
+    owner: monedula-dev
+    name: monedula-gitops
+# Homebrew casks, not formulas: GoReleaser deprecated `brews` because Homebrew
+# discourages formulas that install pre-built binaries, which is exactly what
+# the archives above are.
+homebrew_casks:
+  - name: monedula-gitops
+    repository:
+      owner: monedula-dev
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: "https://github.com/monedula-dev/monedula-gitops"
+    description: "Declarative GitOps for Apache Kafka topics, ACLs, quotas, schemas, and RBAC"
+    commit_author:
+      name: monedula-bot
+      email: noreply@monedula.dev
+    # Downloaded archives carry the quarantine attribute; strip it so the
+    # binary runs without a Gatekeeper prompt.
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/monedula-gitops"]
+          end

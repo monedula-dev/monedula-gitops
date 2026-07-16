@@ -1,0 +1,18 @@
+{
+  "kind": "ImportOutput",
+  "cluster": "prod-eu",
+  "summary": {
+    "topics": 2,
+    "topicAccessRules": 2,
+    "accessPolicies": 1,
+    "policyRules": 1,
+    "schemas": 0,
+    "quotas": 0,
+    "roleBindings": 0,
+    "users": 0,
+    "recordNameSubjects": 0
+  },
+  "warnings": [
+    "principal \"User:x\" has ambiguous consumer group mapping"
+  ]
+}

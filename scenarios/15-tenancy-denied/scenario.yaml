@@ -1,0 +1,4 @@
+title: Tenancy — admission rejects a disallowed topic prefix
+modes: [k8s]
+cluster: shared-sasl
+summary: A KafkaCluster with a tenancy prefix policy; a KafkaTopic whose name violates the allowed prefix is rejected by the admission webhook.

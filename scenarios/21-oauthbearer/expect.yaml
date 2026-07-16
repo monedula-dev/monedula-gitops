@@ -1,0 +1,7 @@
+cli:
+  apply:
+    exitCode: 0
+    outputContains: ["oauth.demo"]
+liveState:
+  topics:
+    - name: oauth.demo

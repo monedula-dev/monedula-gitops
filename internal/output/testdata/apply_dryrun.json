@@ -1,0 +1,39 @@
+{
+  "kind": "ApplyDryRunOutput",
+  "cluster": "prod-eu",
+  "changes": [
+    {
+      "action": "UpdateTopicConfig",
+      "kind": "KafkaTopic",
+      "namespace": "payments",
+      "name": "orders",
+      "target": "payments.orders",
+      "field": "config.retention.ms",
+      "from": "86400000",
+      "to": "604800000",
+      "risk": "Low",
+      "requiresApproval": false
+    },
+    {
+      "action": "CreateAcl",
+      "kind": "KafkaTopic",
+      "name": "orders",
+      "target": "User:svc-checkout Write topic:payments.orders Allow",
+      "risk": "Low",
+      "requiresApproval": false
+    },
+    {
+      "action": "UpdateTopicConfig",
+      "kind": "KafkaTopic",
+      "namespace": "payments",
+      "name": "refunds",
+      "target": "payments.refunds",
+      "field": "config.retention.ms",
+      "from": "86400000",
+      "to": "604800000",
+      "mode": "DetectOnly",
+      "risk": "Low",
+      "requiresApproval": false
+    }
+  ]
+}

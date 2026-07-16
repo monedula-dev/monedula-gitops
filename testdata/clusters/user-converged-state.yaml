@@ -1,0 +1,12 @@
+# Converged state: the declared user's observable identity matches the
+# manifest exactly. The undeclared live user again proves out-of-scope
+# principals stay invisible even when rotation is requested.
+topics: []
+acls: []
+scramCredentials:
+  - user: svc-payments
+    mechanism: SCRAM-SHA-512
+    iterations: 8192
+  - user: legacy-analytics
+    mechanism: SCRAM-SHA-256
+    iterations: 4096

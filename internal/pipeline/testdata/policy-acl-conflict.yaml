@@ -1,0 +1,22 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaAccessPolicy
+metadata:
+  name: conflict-policy
+spec:
+  clusterRef:
+    name: prod
+  rules:
+    - principal: "User:alice"
+      permission: Allow
+      resource:
+        type: topic
+        name: payments.orders
+      operations:
+        - Read
+    - principal: "User:alice"
+      permission: Deny
+      resource:
+        type: topic
+        name: payments.orders
+      operations:
+        - Read

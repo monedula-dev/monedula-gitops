@@ -1,0 +1,4 @@
+title: Opt-in ACL pruning with --prune
+modes: [cli]
+cluster: shared-sasl
+summary: Shows that apply without --prune leaves stale ACLs as PruneDisabled (safe default), while apply --prune explicitly deletes in-scope ACLs no longer desired, demonstrating the opt-in safety model for destructive access changes.

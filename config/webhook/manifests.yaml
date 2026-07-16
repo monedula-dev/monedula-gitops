@@ -1,0 +1,111 @@
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: monedula-validating-webhook-configuration
+  annotations:
+    # cert-manager injects the CA bundle from the serving Certificate so the
+    # API server can verify the webhook's TLS certificate.  Value:
+    # <namespace>/<Certificate-resource-name>  (must match config/certmanager/).
+    cert-manager.io/inject-ca-from: monedula-system/monedula-gitops-webhook-cert
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: monedula-gitops-webhook-service
+      namespace: monedula-system
+      path: /validate-gitops-monedula-dev-v1alpha1-kafkaaccesspolicy
+  failurePolicy: Fail
+  name: vkafkaaccesspolicy.gitops.monedula.dev
+  rules:
+  - apiGroups:
+    - gitops.monedula.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - kafkaaccesspolicies
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: monedula-gitops-webhook-service
+      namespace: monedula-system
+      path: /validate-gitops-monedula-dev-v1alpha1-kafkaquota
+  failurePolicy: Fail
+  name: vkafkaquota.gitops.monedula.dev
+  rules:
+  - apiGroups:
+    - gitops.monedula.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - kafkaquotas
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: monedula-gitops-webhook-service
+      namespace: monedula-system
+      path: /validate-gitops-monedula-dev-v1alpha1-kafkarolebinding
+  failurePolicy: Fail
+  name: vkafkarolebinding.gitops.monedula.dev
+  rules:
+  - apiGroups:
+    - gitops.monedula.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - kafkarolebindings
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: monedula-gitops-webhook-service
+      namespace: monedula-system
+      path: /validate-gitops-monedula-dev-v1alpha1-kafkatopic
+  failurePolicy: Fail
+  name: vkafkatopic.gitops.monedula.dev
+  rules:
+  - apiGroups:
+    - gitops.monedula.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - kafkatopics
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: monedula-gitops-webhook-service
+      namespace: monedula-system
+      path: /validate-gitops-monedula-dev-v1alpha1-kafkauser
+  failurePolicy: Fail
+  name: vkafkauser.gitops.monedula.dev
+  rules:
+  - apiGroups:
+    - gitops.monedula.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - kafkausers
+  sideEffects: None

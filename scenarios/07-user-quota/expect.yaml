@@ -1,0 +1,20 @@
+cli:
+  apply:
+    exitCode: 0
+k8s:
+  conditions:
+    - kind: KafkaQuota
+      name: svc-quota
+      type: Ready
+      status: "True"
+    - kind: KafkaQuota
+      name: svc-quota
+      type: QuotaSynced
+      status: "True"
+liveState:
+  quotas:
+    - entity:
+        user: "svc-quota-user"
+      limits:
+        producer_byte_rate: 1048576
+        consumer_byte_rate: 2097152

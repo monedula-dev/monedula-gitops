@@ -1,0 +1,17 @@
+roleBindings:
+  - principal: User:svc-checkout
+    role: DeveloperWrite
+    scopeType: kafka
+    kafkaCluster: lkc-rbac-test
+    resource:
+      type: Topic
+      name: orders
+      patternType: literal
+  - principal: User:svc-checkout
+    role: DeveloperWrite
+    scopeType: kafka
+    kafkaCluster: lkc-rbac-test
+    resource:
+      type: Topic
+      name: payments.old
+      patternType: literal

@@ -1,0 +1,7 @@
+# Kafka mock state matching the manifest (topic payments.orders, 1 partition)
+# so there is NO kafka drift; the only drift is the FIRST-TIME subject
+# compatibility set below the registry's global default (see
+# schema-fresh-none-sr.yaml).
+topics:
+  - name: payments.orders
+    partitions: 1

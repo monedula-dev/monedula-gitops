@@ -1,0 +1,17 @@
+cli:
+  apply:
+    exitCode: 0
+k8s:
+  conditions:
+    - kind: KafkaTopic
+      name: schema-demo
+      type: Ready
+      status: "True"
+    - kind: KafkaTopic
+      name: schema-demo
+      type: SchemaSynced
+      status: "True"
+liveState:
+  subjects:
+    - name: schema.demo-value
+      compatibility: BACKWARD

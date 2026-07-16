@@ -1,0 +1,11 @@
+# Demo namespace for the operator quickstart sample resources.
+# The KafkaCluster/KafkaTopic/KafkaAccessPolicy CRs and the kafka-credentials
+# Secret all live here: the operator's K8sResolver reads Secrets from the
+# resource's own namespace, and clusterRef is resolved in the resource's
+# namespace (the operator runs with the default --cluster-namespace="").
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monedula-demo
+  labels:
+    app.kubernetes.io/part-of: monedula-quickstart

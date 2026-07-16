@@ -1,0 +1,45 @@
+{
+  "kind": "ApplyResult",
+  "cluster": "prod-eu",
+  "summary": {
+    "Blocked": 1,
+    "ReportOnly": 1,
+    "Succeeded": 1
+  },
+  "results": [
+    {
+      "action": "UpdateTopicConfig",
+      "kind": "KafkaTopic",
+      "name": "orders",
+      "target": "payments.orders",
+      "field": "config.retention.ms",
+      "from": "86400000",
+      "to": "604800000",
+      "risk": "Low",
+      "status": "Succeeded"
+    },
+    {
+      "action": "IncreasePartitions",
+      "kind": "KafkaTopic",
+      "name": "orders",
+      "target": "payments.orders",
+      "field": "partitions",
+      "from": "3",
+      "to": "6",
+      "risk": "Medium",
+      "status": "Blocked"
+    },
+    {
+      "action": "UpdateTopicConfig",
+      "kind": "KafkaTopic",
+      "name": "refunds",
+      "target": "payments.refunds",
+      "field": "config.retention.ms",
+      "from": "86400000",
+      "to": "604800000",
+      "mode": "DetectOnly",
+      "risk": "Low",
+      "status": "ReportOnly"
+    }
+  ]
+}

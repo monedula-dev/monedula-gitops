@@ -1,0 +1,17 @@
+topics:
+  - name: payments.orders
+    partitions: 6
+    config:
+      retention.ms: "604800000"
+  - name: search.idx
+    partitions: 3
+acls:
+  # Producer: folds into payments.orders producer access.
+  - { principal: "User:svc-checkout", host: "*", resourceType: topic, resourceName: payments.orders, patternType: literal, operation: Write, permission: Allow }
+  - { principal: "User:svc-checkout", host: "*", resourceType: topic, resourceName: payments.orders, patternType: literal, operation: Describe, permission: Allow }
+  # Consumer: folds into payments.orders consumer access (with group "rep").
+  - { principal: "User:svc-rep", host: "*", resourceType: topic, resourceName: payments.orders, patternType: literal, operation: Read, permission: Allow }
+  - { principal: "User:svc-rep", host: "*", resourceType: topic, resourceName: payments.orders, patternType: literal, operation: Describe, permission: Allow }
+  - { principal: "User:svc-rep", host: "*", resourceType: group, resourceName: rep, patternType: literal, operation: Read, permission: Allow }
+  # Prefixed ACL: not fold-eligible (prefixed pattern) -> becomes a KafkaAccessPolicy.
+  - { principal: "User:admin", host: "*", resourceType: topic, resourceName: "search.", patternType: prefixed, operation: Read, permission: Allow }

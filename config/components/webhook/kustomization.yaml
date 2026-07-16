@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# Layers the admission webhook + cert-manager wiring onto config/default.
+# Requires cert-manager in the cluster. The CA bundle is injected into the
+# ValidatingWebhookConfiguration by cert-manager via the inject-ca-from
+# annotation already present in config/webhook/manifests.yaml.
+resources:
+- ../../webhook
+- ../../certmanager
+
+patches:
+- path: manager_webhook_patch.yaml

@@ -1,0 +1,4 @@
+title: Create a topic with config
+modes: [cli, k8s]
+cluster: shared-sasl
+summary: Apply one KafkaTopic and verify it lands on the broker with its config.

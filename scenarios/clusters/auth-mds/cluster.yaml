@@ -1,0 +1,43 @@
+# KafkaCluster CR for CLI mode (docker compose) — single-node cp-server with
+# RBAC / Metadata Service (MDS) + LDAP identity backend.
+#
+# Security model (DEV ONLY):
+#   - Kafka client listener: SASL_PLAINTEXT / PLAIN (LDAP-validated) on :9092.
+#     The client authenticates as kafka-admin/kafka-admin-secret (LDAP user).
+#   - MDS REST API: HTTP on :8090 (no TLS for dev).
+#     The product authenticates to MDS as mds/mds-secret (LDAP user) using
+#     HTTP Basic auth, which MDS exchanges for a short-lived bearer token.
+#
+# Environment variables required:
+#   export MDS_USER=mds
+#   export MDS_PASSWORD=mds-secret
+#   export KAFKA_USERNAME=kafka-admin
+#   export KAFKA_PASSWORD=kafka-admin-secret
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: shared
+spec:
+  bootstrapServers: localhost:9092
+  auth:
+    mechanism: PLAIN
+    scram:
+      username:
+        valueFrom:
+          env: KAFKA_USERNAME
+      password:
+        valueFrom:
+          env: KAFKA_PASSWORD
+  authorization:
+    mds:
+      endpoint: http://localhost:8090
+      auth:
+        type: basic
+        username:
+          valueFrom:
+            env: MDS_USER
+        password:
+          valueFrom:
+            env: MDS_PASSWORD
+      clusters:
+        kafkaCluster: "4L6g3nShT-eMCtK--X86sw"

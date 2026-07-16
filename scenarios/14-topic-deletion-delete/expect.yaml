@@ -1,0 +1,4 @@
+liveState:
+  absent:
+    topics:
+      - delete.demo

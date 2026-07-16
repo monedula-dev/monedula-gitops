@@ -1,0 +1,20 @@
+topics:
+  - name: payments.orders
+    partitions: 1
+scramCredentials:
+  # The connecting principal (see IMPORT_USERS_TEST_USER in the test) — should
+  # be skipped by default, captured with --include-connecting-user.
+  - user: admin
+    mechanism: SCRAM-SHA-512
+    iterations: 4096
+  # Plain single-mechanism user.
+  - user: svc-checkout
+    mechanism: SCRAM-SHA-512
+    iterations: 4096
+  # Both-mechanisms user: only SCRAM-SHA-512 should be captured.
+  - user: svc-reporting
+    mechanism: SCRAM-SHA-256
+    iterations: 4096
+  - user: svc-reporting
+    mechanism: SCRAM-SHA-512
+    iterations: 4096

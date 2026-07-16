@@ -1,0 +1,48 @@
+{{- if and .Values.metrics.service.enabled .Values.metrics.serviceMonitor.enabled -}}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "monedula-gitops.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "monedula-gitops.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "monedula-gitops.selectorLabels" . | nindent 6 }}
+  endpoints:
+  - port: metrics
+    {{- with .Values.metrics.serviceMonitor.interval }}
+    interval: {{ . }}
+    {{- end }}
+    {{- $scheme := .Values.metrics.serviceMonitor.scheme }}
+    {{- if not $scheme }}{{- if .Values.metrics.secure }}{{- $scheme = "https" }}{{- end }}{{- end }}
+    {{- with $scheme }}
+    scheme: {{ . }}
+    {{- end }}
+    {{- if .Values.metrics.secure }}
+    {{- with .Values.metrics.serviceMonitor.bearerTokenSecret }}
+    bearerTokenSecret:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    tlsConfig:
+      {{- if .Values.metrics.serviceMonitor.tlsConfig }}
+      {{- toYaml .Values.metrics.serviceMonitor.tlsConfig | nindent 6 }}
+      {{- else }}
+      insecureSkipVerify: true
+      {{- end }}
+    {{- else }}
+    {{- with .Values.metrics.serviceMonitor.tlsConfig }}
+    tlsConfig:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- end }}
+    {{- with .Values.metrics.serviceMonitor.relabelings }}
+    relabelings:
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.metrics.serviceMonitor.metricRelabelings }}
+    metricRelabelings:
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

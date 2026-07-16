@@ -1,0 +1,4 @@
+title: KafkaUser — SCRAM credential and the topic that trusts it
+modes: [cli, k8s]
+cluster: shared-sasl
+summary: Apply a KafkaUser declaring a SCRAM-SHA-512 credential for svc-orders-app, and a KafkaTopic whose access block grants that principal Write, then verify both the live credential and the derived ACL on the broker.

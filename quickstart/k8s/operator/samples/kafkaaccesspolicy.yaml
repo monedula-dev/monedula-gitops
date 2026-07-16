@@ -1,0 +1,25 @@
+# Sample KafkaAccessPolicy: a prefixed Topic ACL letting the billing service
+# read every topic under the `payments.` prefix. Managed independently of the
+# KafkaTopic sample.
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaAccessPolicy
+metadata:
+  name: billing-access
+  namespace: monedula-demo
+spec:
+  clusterRef:
+    name: demo
+  rules:
+  - principal: User:billing-service
+    permission: Allow
+    host: "*"
+    resource:
+      type: topic
+      name: payments.
+      patternType: prefixed
+    operations:
+    - Read
+    - Describe
+  reconciliation:
+    mode: Enforce
+  deletionPolicy: Orphan

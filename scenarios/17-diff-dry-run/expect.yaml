@@ -1,0 +1,10 @@
+steps:
+  - run: diff
+    expect: { exitCode: 0, outputContains: ["diff.demo"] }
+  - run: apply
+    expect: { exitCode: 0 }
+  - run: diff
+    expect: { exitCode: 0, outputContains: ["No changes"] }
+  - run: apply
+    flags: ["--dry-run"]
+    expect: { exitCode: 0, outputContains: ["No changes"] }

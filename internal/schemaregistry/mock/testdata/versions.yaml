@@ -1,0 +1,8 @@
+# Multi-version subject fixture: versions are listed oldest-first; the last
+# entry is the latest version (here v2).
+subjects:
+  - subject: multi-value
+    type: AVRO
+    versions:
+      - '{"name":"v1"}'
+      - '{"name":"v2"}'

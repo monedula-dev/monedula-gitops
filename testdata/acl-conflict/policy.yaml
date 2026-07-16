@@ -1,0 +1,16 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaAccessPolicy
+metadata:
+  name: billing-deny
+spec:
+  clusterRef:
+    name: dev
+  rules:
+    - principal: "User:svc-billing"
+      permission: Deny
+      resource:
+        type: topic
+        name: payments.billing
+        patternType: literal
+      operations:
+        - Write

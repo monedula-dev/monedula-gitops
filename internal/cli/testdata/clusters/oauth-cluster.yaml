@@ -1,0 +1,18 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: oauth-dev
+  annotations:
+    gitops.monedula.dev/mock-state-file: state.yaml
+spec:
+  bootstrapServers: localhost:9092
+  auth:
+    mechanism: OAUTHBEARER
+    oauth:
+      tokenEndpoint: https://idp.example.com/token
+      clientId:
+        valueFrom:
+          env: OAUTH_TEST_CLIENT_ID
+      clientSecret:
+        valueFrom:
+          env: OAUTH_TEST_CLIENT_SECRET

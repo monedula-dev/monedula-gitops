@@ -1,0 +1,16 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaQuota
+metadata:
+  name: sample-quota
+  namespace: monedula-system
+spec:
+  clusterRef:
+    name: sample-cluster
+  entity:
+    user: User:svc-checkout
+    clientId: batch
+  limits:
+    producerByteRate: 1048576
+    consumerByteRate: 2097152
+  reconciliation:
+    mode: Enforce

@@ -1,0 +1,14 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: rbac-dev
+  annotations:
+    gitops.monedula.dev/mock-state-file: state.yaml
+    gitops.monedula.dev/mock-mds-file: rbac-empty-state.yaml
+spec:
+  bootstrapServers: localhost:9092
+  authorization:
+    mds:
+      endpoint: http://mds.local:8090
+      clusters:
+        kafkaCluster: lkc-rbac-test

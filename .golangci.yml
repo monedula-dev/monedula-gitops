@@ -1,0 +1,33 @@
+version: "2"
+
+# Conservative, curated lint set for CI. Deliberately narrow: correctness and
+# hygiene checks with a low false-positive rate, not a style-opinion linter.
+# Grow this list deliberately, not by default-enabling everything upstream adds.
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - misspell
+    - unused
+  exclusions:
+    paths:
+      # Generated deepcopy/client code.
+      - zz_.*\.go$
+    rules:
+      # internal/api/v1alpha1/types.go carries +kubebuilder CEL marker comments
+      # that are hand-tuned to avoid Go 1.26 gofmt's curly-quote rewrite (see
+      # the guard comment at the top of the file). staticcheck's ST1005
+      # (error string capitalization/punctuation) style nits on doc comments
+      # in that file are excluded to avoid tempting an auto-fix that touches
+      # those comments; every other linter still runs on it.
+      - path: internal/api/v1alpha1/types\.go
+        linters:
+          - staticcheck
+        text: "ST1005"
+
+formatters:
+  exclusions:
+    paths:
+      - zz_.*\.go$

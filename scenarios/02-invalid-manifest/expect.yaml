@@ -1,0 +1,4 @@
+cli:
+  validate:
+    exitCode: 2
+    outputContains: ["partitions must be >= 1"]

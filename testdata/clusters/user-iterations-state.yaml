@@ -1,0 +1,8 @@
+# The declared user exists under the declared mechanism but with a lower
+# iteration count than the manifest pins (4096 live vs 8192 desired).
+topics: []
+acls: []
+scramCredentials:
+  - user: svc-payments
+    mechanism: SCRAM-SHA-512
+    iterations: 4096

@@ -1,0 +1,4 @@
+title: Topic deletion — Orphan policy
+modes: [k8s]
+cluster: shared-sasl
+summary: A KafkaTopic with deletionPolicy Orphan; deleting the CR stops management but leaves the Kafka topic on the broker.

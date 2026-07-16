@@ -1,0 +1,4 @@
+title: Import round-trip
+modes: [cli]
+cluster: shared-sasl
+summary: Apply a topic (with access) and a quota, import the live cluster back to manifests, and verify the imported manifests are drift-free — proving import faithfully reconstructs live state.

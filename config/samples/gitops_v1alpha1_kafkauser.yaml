@@ -1,0 +1,20 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaUser
+metadata:
+  name: sample-user
+  namespace: monedula-system
+spec:
+  clusterRef:
+    name: sample-cluster
+  username: sample-user
+  mechanism: SCRAM-SHA-512
+  # iterations: 8192
+  password:
+    valueFrom:
+      secretKeyRef:
+        name: sample-user-credentials
+        key: password
+  # Alternative: let the operator generate and own the password Secret
+  # (operator mode only; the CLI has no way to invent a value out of thin air).
+  # password:
+  #   generate: {}

@@ -1,0 +1,8 @@
+topics:
+  - name: payments.ingest
+    partitions: 6
+    config:
+      retention.ms: "604800000"
+acls:
+  - { principal: "User:svc-ingest", host: "10.0.0.0/8", resourceType: topic, resourceName: payments.ingest, patternType: literal, operation: Write, permission: Allow }
+  - { principal: "User:svc-ingest", host: "10.0.0.0/8", resourceType: topic, resourceName: payments.ingest, patternType: literal, operation: Describe, permission: Allow }

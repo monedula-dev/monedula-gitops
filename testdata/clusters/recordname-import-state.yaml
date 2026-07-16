@@ -1,0 +1,10 @@
+# Live Kafka state for the TopicRecordName import acceptance test.
+# Three topics seeded alongside a Schema Registry mock with three subject kinds:
+#   orders        -> TopicRecordName subject  orders-com.acme.OrderCreated
+#   events        -> TopicName subject         events-value
+#   (no topic)    -> RecordName subject        com.acme.Shared (report-only)
+topics:
+  - name: orders
+    partitions: 3
+  - name: events
+    partitions: 1

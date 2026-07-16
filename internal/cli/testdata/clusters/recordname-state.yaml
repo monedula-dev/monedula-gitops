@@ -1,0 +1,5 @@
+# Topic already exists with the manifest's shape, so there is NO kafka drift;
+# the only desired change is the RecordName-strategy schema registration.
+topics:
+  - name: payments.orders
+    partitions: 1

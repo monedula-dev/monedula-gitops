@@ -1,0 +1,5 @@
+steps:
+  - run: apply
+    expect: { exitCode: 0, outputContains: ["AddRoleBinding"] }
+  - run: verify
+    expect: { exitCode: 0 }

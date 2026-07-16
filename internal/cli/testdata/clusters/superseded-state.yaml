@@ -1,0 +1,3 @@
+topics:
+  - name: payments.sup
+    partitions: 1

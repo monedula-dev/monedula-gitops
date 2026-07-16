@@ -1,0 +1,18 @@
+# KafkaCluster CR for CLI mode (docker compose) with SASL_PLAINTEXT / OAUTHBEARER.
+# DEV ONLY. Tokens come from the mock OIDC server (navikt/mock-oauth2-server).
+# Environment variables required:
+#   export OAUTH_CLIENT_ID=monedula
+#   export OAUTH_CLIENT_SECRET=monedula-secret
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: shared
+spec:
+  bootstrapServers: localhost:9092
+  auth:
+    mechanism: OAUTHBEARER
+    oauth:
+      tokenEndpoint: http://localhost:8080/default/token
+      clientId:     { valueFrom: { env: OAUTH_CLIENT_ID } }
+      clientSecret: { valueFrom: { env: OAUTH_CLIENT_SECRET } }
+      scope: kafka

@@ -1,0 +1,4 @@
+title: Diff and dry-run preview
+modes: [cli]
+cluster: shared-sasl
+summary: diff and apply --dry-run are read-only previews — diff before apply shows the planned create, after apply it is clean, and --dry-run never mutates the broker.

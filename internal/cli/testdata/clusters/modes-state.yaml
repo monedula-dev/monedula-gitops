@@ -1,0 +1,16 @@
+# Mock live state for the modes fixtures: every topic exists with a stale
+# retention.ms, so each of the three manifests (Enforce/DetectOnly/ObserveOnly)
+# drifts by exactly one UpdateTopicConfig op.
+topics:
+  - name: modes.enforce
+    partitions: 3
+    config:
+      retention.ms: "86400000"
+  - name: modes.detect
+    partitions: 3
+    config:
+      retention.ms: "86400000"
+  - name: modes.observe
+    partitions: 3
+    config:
+      retention.ms: "86400000"

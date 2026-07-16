@@ -1,0 +1,16 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaRoleBinding
+metadata:
+  name: checkout-writer
+  namespace: default
+spec:
+  clusterRef:
+    name: rbac-dev
+  principal: User:svc-checkout
+  role: DeveloperWrite
+  scope:
+    type: kafka
+  resources:
+    - type: Topic
+      name: orders
+      patternType: literal

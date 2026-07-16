@@ -1,0 +1,7 @@
+# Namespace for the auth-sasl-ssl scenario cluster (SASL_SSL / SCRAM-SHA-512).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kafka
+  labels:
+    app.kubernetes.io/part-of: monedula-e2e

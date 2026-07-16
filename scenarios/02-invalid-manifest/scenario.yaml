@@ -1,0 +1,4 @@
+title: Validation rejects a malformed manifest
+modes: [cli]
+cluster: shared-sasl
+summary: The validate command catches a bad manifest (partitions=0) before any cluster contact.

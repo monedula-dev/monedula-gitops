@@ -1,0 +1,31 @@
+cli:
+  apply:
+    exitCode: 0
+    outputContains: ["svc-orders-app", "users.orders"]
+k8s:
+  conditions:
+    - kind: KafkaUser
+      name: svc-orders-app
+      type: Ready
+      status: "True"
+    - kind: KafkaUser
+      name: svc-orders-app
+      type: UserSynced
+      status: "True"
+    - kind: KafkaTopic
+      name: users-orders
+      type: Ready
+      status: "True"
+    - kind: KafkaTopic
+      name: users-orders
+      type: TopicAccessSynced
+      status: "True"
+liveState:
+  users:
+    - username: svc-orders-app
+      mechanism: SCRAM-SHA-512
+  acls:
+    - principal: "User:svc-orders-app"
+      operation: Write
+      resourceType: topic
+      resourceName: users.orders

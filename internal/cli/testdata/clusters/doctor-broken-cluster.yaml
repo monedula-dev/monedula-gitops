@@ -1,0 +1,11 @@
+# Doctor failure fixture: the mock-state annotation points at a file that does
+# not exist, so buildLiveClient errors — the hermetic stand-in for a broker
+# that cannot be reached (bad bootstrap servers / TLS / auth).
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: broken
+  annotations:
+    gitops.monedula.dev/mock-state-file: doctor-missing-state.yaml
+spec:
+  bootstrapServers: localhost:9092

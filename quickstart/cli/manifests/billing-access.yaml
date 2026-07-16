@@ -1,0 +1,21 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaAccessPolicy
+metadata:
+  name: billing-access
+  namespace: payments
+spec:
+  clusterRef:
+    name: local
+  rules:
+    - principal: "User:svc-billing"
+      permission: Allow
+      host: "*"
+      resource:
+        type: topic
+        name: billing.
+        patternType: prefixed
+      operations:
+        - Read
+        - Write
+        - Describe
+  deletionPolicy: Orphan

@@ -1,0 +1,8 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: host-scoped
+  annotations:
+    gitops.monedula.dev/mock-state-file: host-scoped-state.yaml
+spec:
+  bootstrapServers: localhost:9092

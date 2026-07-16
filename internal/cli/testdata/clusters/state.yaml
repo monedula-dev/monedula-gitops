@@ -1,0 +1,7 @@
+topics:
+  - name: payments.orders
+    partitions: 12
+    config:
+      retention.ms: "86400000"
+acls:
+  - { principal: "User:svc-checkout", host: "*", resourceType: topic, resourceName: payments.orders, patternType: literal, operation: Write, permission: Allow }

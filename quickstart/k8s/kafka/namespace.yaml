@@ -1,0 +1,7 @@
+# Namespace for the in-cluster quickstart Kafka + Schema Registry.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kafka
+  labels:
+    app.kubernetes.io/part-of: monedula-quickstart

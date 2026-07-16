@@ -1,0 +1,4 @@
+title: Doctor preflight checks
+modes: [cli]
+cluster: shared-sasl
+summary: Run the read-only `doctor` command to confirm cluster connectivity and operational readiness (config, Kafka client/admin, ACL read, Schema Registry) before applying — a healthy cluster reports all checks pass and exits 0.

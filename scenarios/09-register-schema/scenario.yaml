@@ -1,0 +1,4 @@
+title: Register an AVRO schema
+modes: [cli, k8s]
+cluster: shared-sasl
+summary: Apply a KafkaTopic with an inline AVRO schema definition and verify the subject is registered in Schema Registry with BACKWARD compatibility.

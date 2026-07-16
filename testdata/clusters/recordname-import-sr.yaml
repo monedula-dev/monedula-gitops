@@ -1,0 +1,23 @@
+# Schema Registry mock state for the TopicRecordName import acceptance test.
+# Three subjects exercising the three classification strategies:
+#   1. TopicRecordName: "orders-com.acme.OrderCreated" — record full name extracted
+#      from the body matches "<topic>-<recordName>".
+#   2. TopicName: "events-value" — classic "<topic>-value" subject.
+#   3. RecordName: "com.acme.Shared" — subject name equals the record's full name;
+#      reported for manual attribution, not written into a manifest.
+subjects:
+  - subject: orders-com.acme.OrderCreated
+    type: AVRO
+    compatibility: FULL
+    definition: |
+      {"type":"record","namespace":"com.acme","name":"OrderCreated","fields":[{"name":"id","type":"string"}]}
+  - subject: events-value
+    type: AVRO
+    compatibility: BACKWARD
+    definition: |
+      {"type":"record","namespace":"com.acme","name":"Event","fields":[]}
+  - subject: com.acme.Shared
+    type: AVRO
+    compatibility: BACKWARD
+    definition: |
+      {"type":"record","namespace":"com.acme","name":"Shared","fields":[]}

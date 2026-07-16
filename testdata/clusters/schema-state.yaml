@@ -1,0 +1,6 @@
+# Live Kafka state matching the manifest under testdata/schema (topic
+# payments.orders, 1 partition) so there is NO kafka drift. The only drift is
+# the absent value subject in the Schema Registry (schema-sr.yaml is empty).
+topics:
+  - name: payments.orders
+    partitions: 1

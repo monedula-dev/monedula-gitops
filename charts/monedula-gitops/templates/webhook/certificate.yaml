@@ -1,0 +1,27 @@
+{{- if and .Values.webhook.enabled .Values.webhook.certManager.enabled -}}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "monedula-gitops.fullname" . }}-selfsigned-issuer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "monedula-gitops.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "monedula-gitops.fullname" . }}-webhook-cert
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "monedula-gitops.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "monedula-gitops.webhookCertSecret" . }}
+  dnsNames:
+  - {{ include "monedula-gitops.fullname" . }}-webhook.{{ .Release.Namespace }}.svc
+  - {{ include "monedula-gitops.fullname" . }}-webhook.{{ .Release.Namespace }}.svc.cluster.local
+  issuerRef:
+    name: {{ include "monedula-gitops.fullname" . }}-selfsigned-issuer
+    kind: Issuer
+{{- end }}

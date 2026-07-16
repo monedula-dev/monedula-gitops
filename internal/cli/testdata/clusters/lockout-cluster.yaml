@@ -1,0 +1,17 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: lockout
+  annotations:
+    gitops.monedula.dev/mock-state-file: lockout-state.yaml
+spec:
+  bootstrapServers: localhost:9092
+  auth:
+    mechanism: SCRAM-SHA-512
+    scram:
+      username:
+        valueFrom:
+          env: LOCKOUT_TEST_USER
+      password:
+        valueFrom:
+          env: LOCKOUT_TEST_PASS

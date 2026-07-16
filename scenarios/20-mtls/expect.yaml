@@ -1,0 +1,7 @@
+cli:
+  apply:
+    exitCode: 0
+    outputContains: ["mtls.demo"]
+liveState:
+  topics:
+    - name: mtls.demo

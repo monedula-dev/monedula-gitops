@@ -1,0 +1,10 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: sch
+spec:
+  bootstrapServers: localhost:9092
+  schemaRegistry:
+    endpoint: http://sr
+  defaults:
+    replicationFactor: 3

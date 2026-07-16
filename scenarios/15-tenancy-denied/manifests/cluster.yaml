@@ -1,0 +1,27 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: tenant
+spec:
+  bootstrapServers: host.docker.internal:9096
+  auth:
+    mechanism: SCRAM-SHA-512
+    scram:
+      username:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-credentials
+            key: kafka-username
+      password:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-credentials
+            key: kafka-password
+  tenancy:
+    allowedNamespaces:
+      - monedula-e2e
+    topicPrefixes:
+      - namespaces:
+          - monedula-e2e
+        prefixes:
+          - payments.

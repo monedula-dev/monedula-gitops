@@ -1,0 +1,4 @@
+title: Topic with producer/consumer access
+modes: [cli, k8s]
+cluster: shared-sasl
+summary: Apply a KafkaTopic with inline ACL rules for one producer and one consumer and verify the ACLs land on the broker.

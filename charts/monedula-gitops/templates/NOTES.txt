@@ -1,0 +1,19 @@
+{{ include "monedula-gitops.fullname" . }} installed into namespace {{ .Release.Namespace }}.
+
+Operator image: {{ include "monedula-gitops.image" . }}
+{{- if .Values.webhook.enabled }}
+Admission webhook ENABLED.
+{{- if .Values.webhook.certManager.enabled }}
+  cert-manager must be installed in the cluster — it issues and injects the serving
+  certificate. If pods stay in ContainerCreating, verify cert-manager is healthy.
+{{- else }}
+  BYO cert mode: ensure Secret {{ include "monedula-gitops.webhookCertSecret" . }} exists
+  and webhook.caBundle is set.
+{{- end }}
+{{- else }}
+Admission webhook DISABLED (cert-free). Enable with --set webhook.enabled=true
+(requires cert-manager unless using BYO certs).
+{{- end }}
+
+Check rollout:
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "monedula-gitops.fullname" . }}

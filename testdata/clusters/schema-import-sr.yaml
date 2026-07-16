@@ -1,0 +1,18 @@
+# Schema Registry mock state SEEDED with the value subject for topic
+# payments.orders, so `import cluster` folds it into spec.schema and writes the
+# schema file verbatim. Verifying the imported manifests against this same
+# cluster must then report NO schema drift (the round-trip invariant).
+subjects:
+  - subject: payments.orders-value
+    type: AVRO
+    compatibility: BACKWARD
+    definition: |
+      {
+        "type": "record",
+        "name": "Order",
+        "namespace": "payments",
+        "fields": [
+          {"name": "id", "type": "string"},
+          {"name": "amount", "type": "long"}
+        ]
+      }

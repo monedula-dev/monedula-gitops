@@ -1,0 +1,96 @@
+{{- /* Rules mirror config/rbac/role.yaml — keep in sync (Task-9 render drift test enforces equality). */ -}}
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "monedula-gitops.fullname" . }}-manager-role
+  labels:
+    {{- include "monedula-gitops.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
+  - authentication.k8s.io
+  resources:
+  - tokenreviews
+  verbs:
+  - create
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
+- apiGroups:
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - gitops.monedula.dev
+  resources:
+  - kafkaaccesspolicies
+  - kafkaclusters
+  - kafkatopics
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - gitops.monedula.dev
+  resources:
+  - kafkaaccesspolicies/finalizers
+  - kafkaquotas/finalizers
+  - kafkarolebindings/finalizers
+  - kafkatopics/finalizers
+  - kafkausers/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - gitops.monedula.dev
+  resources:
+  - kafkaaccesspolicies/status
+  - kafkaclusters/status
+  - kafkaquotas/status
+  - kafkarolebindings/status
+  - kafkatopics/status
+  - kafkausers/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - gitops.monedula.dev
+  resources:
+  - kafkaquotas
+  - kafkarolebindings
+  - kafkausers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+{{- end }}

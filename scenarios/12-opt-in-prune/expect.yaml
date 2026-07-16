@@ -1,0 +1,13 @@
+steps:
+  - run: apply
+    expect: { exitCode: 0 }
+  - run: apply
+    manifests: manifests-pruned
+    expect: { exitCode: 0, outputContains: ["PruneDisabled DeleteAcl"] }
+  - run: apply
+    manifests: manifests-pruned
+    flags: ["--prune"]
+    expect: { exitCode: 0, outputContains: ["Succeeded DeleteAcl"] }
+  - run: verify
+    manifests: manifests-pruned
+    expect: { exitCode: 0 }

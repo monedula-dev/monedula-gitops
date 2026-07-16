@@ -1,0 +1,10 @@
+# Mock live state for the prune fixture: the topic and the desired producer ACL
+# match the manifest exactly; the only divergence is ONE extra live ACL for the
+# same (principal, resource pattern) — in scope, no longer desired — i.e. a
+# prune candidate (spec §10.3).
+topics:
+  - name: prune.orders
+    partitions: 3
+acls:
+  - { principal: "User:svc-a", host: "*", resourceType: topic, resourceName: prune.orders, patternType: literal, operation: Write, permission: Allow }
+  - { principal: "User:svc-a", host: "*", resourceType: topic, resourceName: prune.orders, patternType: literal, operation: Read, permission: Allow }

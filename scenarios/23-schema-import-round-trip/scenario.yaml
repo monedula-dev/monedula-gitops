@@ -1,0 +1,4 @@
+title: Schema import round-trip
+modes: [cli]
+cluster: shared-sasl
+summary: Apply a topic carrying an inline AVRO schema, import the live cluster (with schemas), and verify the imported manifests are drift-free — proving schema subjects round-trip faithfully (subject, schema body, and compatibility).

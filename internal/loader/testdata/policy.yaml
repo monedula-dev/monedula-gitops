@@ -1,0 +1,14 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaAccessPolicy
+metadata:
+  name: p
+spec:
+  clusterRef:
+    name: prod
+  rules:
+    - principal: User:x
+      resource:
+        type: topic
+        name: t
+      operations:
+        - Read

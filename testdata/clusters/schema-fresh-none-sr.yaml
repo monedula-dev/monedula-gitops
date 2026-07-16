@@ -1,0 +1,7 @@
+# Schema Registry mock state: NO subjects — payments.orders-value has never
+# been configured, so its EFFECTIVE compatibility is the registry's GLOBAL
+# default seeded here. The manifest declares NONE, which sits BELOW BACKWARD:
+# the diff must classify the first-time set as a gated LowerSchemaCompatibility
+# (spec §17.1), Blocked without --allow-destructive.
+globalCompatibility: BACKWARD
+subjects: []

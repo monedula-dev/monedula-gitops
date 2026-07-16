@@ -1,0 +1,21 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaUser
+metadata:
+  name: user-a
+spec:
+  clusterRef:
+    name: a
+  password:
+    valueFrom:
+      env: USER_A_PASSWORD
+---
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaUser
+metadata:
+  name: user-b
+spec:
+  clusterRef:
+    name: b
+  password:
+    valueFrom:
+      env: USER_B_PASSWORD

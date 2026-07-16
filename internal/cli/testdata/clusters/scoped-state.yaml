@@ -1,0 +1,15 @@
+# Simulates a least-privilege topic-only credential (e.g. a Confluent Cloud
+# API key, which cannot DescribeClientQuotas): topic reads work, ACL and quota
+# describes are denied. A topic-only manifest set must diff/verify/apply
+# cleanly against this state (the ACL/quota reads are scoped away entirely);
+# a manifest that DOES compile ACLs or quotas surfaces the injected error.
+topics:
+  - name: payments.orders
+    partitions: 12
+    config:
+      retention.ms: "604800000"
+failures:
+  - method: ListACLs
+    error: "describing acls: CLUSTER_AUTHORIZATION_FAILED: Cluster authorization failed."
+  - method: ListQuotas
+    error: "describing client quotas (user): CLUSTER_AUTHORIZATION_FAILED: Cluster authorization failed."

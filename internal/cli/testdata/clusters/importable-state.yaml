@@ -1,0 +1,34 @@
+topics:
+  - name: payments.orders
+    partitions: 6
+    config:
+      retention.ms: "604800000"
+  - name: search.idx
+    partitions: 3
+  # Housekeeping topics: excluded by default (--include-internal to override,
+  # see TestImportClusterExcludesInternalTopicsByDefault /
+  # TestImportClusterIncludeInternal).
+  - name: __consumer_offsets
+    partitions: 50
+  - name: _schemas
+    partitions: 1
+  - name: _confluent-monitoring
+    partitions: 12
+acls:
+  # Producer: folds into payments.orders producer access.
+  - { principal: "User:svc-checkout", host: "*", resourceType: topic, resourceName: payments.orders, patternType: literal, operation: Write, permission: Allow }
+  - { principal: "User:svc-checkout", host: "*", resourceType: topic, resourceName: payments.orders, patternType: literal, operation: Describe, permission: Allow }
+  # Consumer: folds into payments.orders consumer access (with group "rep").
+  - { principal: "User:svc-rep", host: "*", resourceType: topic, resourceName: payments.orders, patternType: literal, operation: Read, permission: Allow }
+  - { principal: "User:svc-rep", host: "*", resourceType: topic, resourceName: payments.orders, patternType: literal, operation: Describe, permission: Allow }
+  - { principal: "User:svc-rep", host: "*", resourceType: group, resourceName: rep, patternType: literal, operation: Read, permission: Allow }
+  # Prefixed ACL: not fold-eligible (prefixed pattern) -> becomes a KafkaAccessPolicy.
+  - { principal: "User:admin", host: "*", resourceType: topic, resourceName: "search.", patternType: prefixed, operation: Read, permission: Allow }
+quotas:
+  # Reconstructs to a KafkaQuota manifest; omitted entirely under --skip-quotas
+  # (see TestImportClusterSkipQuotas).
+  - entity:
+      - type: user
+        name: svc-checkout
+    limits:
+      producer_byte_rate: 1048576

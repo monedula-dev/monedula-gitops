@@ -1,0 +1,7 @@
+steps:
+  - run: apply
+    expect: { exitCode: 0 }
+  - run: import
+  - run: verify
+    manifests: "@imported"
+    expect: { exitCode: 0 }

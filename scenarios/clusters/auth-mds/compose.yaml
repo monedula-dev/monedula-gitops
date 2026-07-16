@@ -1,0 +1,178 @@
+# Monedula e2e scenario cluster: single-node Confluent Server (cp-server 7.6.1) with
+# RBAC + Metadata Service (MDS) + LDAP identity backend.
+#
+# CP version: 7.6.1 (Kafka 3.6). cp-server 8.x removed the scope-wide
+# POST /security/1.0/lookup/rolebindings endpoint; 7.6 still has it.
+#
+# Security model (DEV ONLY — fake creds/keys):
+#   - Kafka client traffic uses SASL_PLAINTEXT / PLAIN (LDAP-validated) on :9092.
+#   - INTERNAL traffic (KRaft quorum + admin path) is PLAINTEXT on :9094.
+#   - MDS REST API is on :8090 (HTTP, no TLS for dev).
+#   - The MDS admin user is mds/mds-secret (LDAP user in dc=monedula,dc=dev).
+#
+# Bootstrap sequence:
+#   1. ldap starts and seeds users (mds, svc-checkout, kafka-admin) from users.ldif.
+#   2. kafka (cp-server) starts: initialises KRaft, starts RBAC authorizer + MDS.
+#      The MDS uses the RSA token key (./certs/mds-token.key) to sign JWTs.
+#      The LDAP callback handler validates PLAIN credentials against LDAP.
+#      User:mds is a super-user (KAFKA_SUPER_USERS) so it can bootstrap RBAC.
+#   3. rbac-bootstrap waits for MDS to be healthy, then grants User:mds
+#      SystemAdmin over the Kafka cluster scope via the MDS REST API.
+#      This resolves the chicken-and-egg: from this point the product's mds client
+#      (authenticating as User:mds with basic auth) can manage role bindings.
+
+services:
+  ldap:
+    image: osixia/openldap:1.5.0
+    container_name: monedula-mds-ldap
+    environment:
+      LDAP_ORGANISATION: "Monedula Dev"
+      LDAP_DOMAIN: "monedula.dev"
+      LDAP_ADMIN_PASSWORD: "admin-secret"
+    command: ["--copy-service"]
+    volumes:
+      - ./config/users.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/users.ldif:ro
+    healthcheck:
+      test: ["CMD-SHELL", "ldapsearch -x -H ldap://localhost:389 -b dc=monedula,dc=dev -D 'cn=admin,dc=monedula,dc=dev' -w admin-secret uid=mds 2>&1 | grep -q 'numEntries: 1'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  kafka:
+    image: confluentinc/cp-server:7.6.1
+    hostname: kafka
+    container_name: monedula-mds-kafka
+    depends_on:
+      ldap:
+        condition: service_healthy
+    ports:
+      - "9092:9092"   # CLIENTHOST (SASL_PLAINTEXT/PLAIN — LDAP-validated)
+      - "9099:9099"   # CLIENTKIND (SASL_PLAINTEXT/PLAIN — LDAP-validated, kind-facing)
+      - "8090:8090"   # MDS REST API
+    environment:
+      # --- KRaft single node (broker + controller) ---
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      CLUSTER_ID: "4L6g3nShT-eMCtK--X86sw"
+
+      # --- Listeners ---
+      # CONTROLLER  : KRaft quorum (PLAINTEXT, internal)
+      # INTERNAL    : admin path used by bootstrap + healthcheck (PLAINTEXT)
+      # CLIENTHOST  : SASL_PLAINTEXT, host-facing (LDAP PLAIN)
+      # CLIENTKIND  : SASL_PLAINTEXT, kind-facing (LDAP PLAIN), advertised host.docker.internal
+      KAFKA_LISTENERS: "CONTROLLER://:9093,INTERNAL://:9094,CLIENTHOST://:9092,CLIENTKIND://:9099"
+      KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka:9094,CLIENTHOST://localhost:9092,CLIENTKIND://host.docker.internal:9099"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,CLIENTHOST:SASL_PLAINTEXT,CLIENTKIND:SASL_PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+
+      # --- SASL/PLAIN with LDAP callback on CLIENTHOST + CLIENTKIND listeners ---
+      KAFKA_SASL_ENABLED_MECHANISMS: "PLAIN"
+      KAFKA_LISTENER_NAME_CLIENTHOST_SASL_ENABLED_MECHANISMS: "PLAIN"
+      KAFKA_LISTENER_NAME_CLIENTHOST_PLAIN_SASL_SERVER_CALLBACK_HANDLER_CLASS: "io.confluent.security.auth.provider.ldap.LdapAuthenticateCallbackHandler"
+      KAFKA_LISTENER_NAME_CLIENTKIND_SASL_ENABLED_MECHANISMS: "PLAIN"
+      KAFKA_LISTENER_NAME_CLIENTKIND_PLAIN_SASL_SERVER_CALLBACK_HANDLER_CLASS: "io.confluent.security.auth.provider.ldap.LdapAuthenticateCallbackHandler"
+
+      # --- RBAC / Confluent Server authorizer ---
+      KAFKA_AUTHORIZER_CLASS_NAME: "io.confluent.kafka.security.authorizer.ConfluentServerAuthorizer"
+      KAFKA_CONFLUENT_AUTHORIZER_ACCESS_RULE_PROVIDERS: "CONFLUENT"
+      # mds is LDAP user; also grant ANONYMOUS for INTERNAL (plaintext) broker admin ops
+      KAFKA_SUPER_USERS: "User:mds;User:ANONYMOUS;User:kafka-admin"
+
+      # --- Metadata Service (MDS) ---
+      KAFKA_CONFLUENT_METADATA_SERVER_LISTENERS: "http://0.0.0.0:8090"
+      KAFKA_CONFLUENT_METADATA_SERVER_ADVERTISED_LISTENERS: "http://kafka:8090"
+      # MDS authentication: LDAP-backed (the /authenticate endpoint accepts
+      # HTTP Basic credentials which are validated via LDAP).
+      KAFKA_CONFLUENT_METADATA_SERVER_AUTHENTICATION_METHOD: "BEARER"
+      KAFKA_CONFLUENT_METADATA_SERVER_TOKEN_KEY_PATH: "/etc/kafka/secrets/mds-token.key"
+      KAFKA_CONFLUENT_METADATA_SERVER_PUBLIC_KEY_PATH: "/etc/kafka/secrets/mds-token.pub"
+      KAFKA_CONFLUENT_METADATA_SERVER_TOKEN_MAX_LIFETIME_MS: "3600000"
+      KAFKA_CONFLUENT_METADATA_SERVER_TOKEN_SIGNATURE_ALGORITHM: "RS256"
+
+      # --- LDAP wiring for MDS authentication + PLAIN callback ---
+      KAFKA_LDAP_JAVA_NAMING_PROVIDER_URL: "ldap://ldap:389"
+      KAFKA_LDAP_JAVA_NAMING_SECURITY_PRINCIPAL: "cn=admin,dc=monedula,dc=dev"
+      KAFKA_LDAP_JAVA_NAMING_SECURITY_CREDENTIALS: "admin-secret"
+      KAFKA_LDAP_JAVA_NAMING_SECURITY_AUTHENTICATION: "simple"
+      KAFKA_LDAP_USER_SEARCH_BASE: "dc=monedula,dc=dev"
+      KAFKA_LDAP_USER_NAME_ATTRIBUTE: "uid"
+      KAFKA_LDAP_USER_OBJECT_CLASS: "inetOrgPerson"
+      KAFKA_LDAP_USER_MEMBEROF_ATTRIBUTE: "memberOf"
+      KAFKA_LDAP_GROUP_SEARCH_BASE: "dc=monedula,dc=dev"
+      KAFKA_LDAP_GROUP_NAME_ATTRIBUTE: "cn"
+      KAFKA_LDAP_GROUP_MEMBER_ATTRIBUTE: "member"
+      KAFKA_LDAP_GROUP_OBJECT_CLASS: "groupOfNames"
+
+      # --- Single-node tuning ---
+      KAFKA_DEFAULT_REPLICATION_FACTOR: "1"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      KAFKA_CONFLUENT_LICENSE_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_CONFLUENT_BALANCER_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_CONFLUENT_METADATA_TOPIC_REPLICATION_FACTOR: "1"
+
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/secrets/kafka-jaas.conf"
+
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+      - ./config/kafka-jaas.conf:/etc/kafka/secrets/kafka-jaas.conf:ro
+      - ./certs/mds-token.key:/etc/kafka/secrets/mds-token.key:ro
+      - ./certs/mds-token.pub:/etc/kafka/secrets/mds-token.pub:ro
+    healthcheck:
+      # Probe the MDS /security/1.0/authenticate endpoint with the mds LDAP user.
+      # MDS is ready when this returns 200 with a bearer token.
+      test: ["CMD-SHELL", "curl -sf -u mds:mds-secret http://localhost:8090/security/1.0/authenticate -o /dev/null && echo OK || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 90s
+
+  rbac-bootstrap:
+    image: confluentinc/cp-server:7.6.1
+    container_name: monedula-mds-bootstrap
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+
+        MDS_URL="http://kafka:8090"
+
+        # Obtain MDS bearer token for the mds user (who is a super-user).
+        echo "Fetching MDS bearer token..."
+        TOKEN=$$(curl -sf -u "mds:mds-secret" \
+          "$${MDS_URL}/security/1.0/authenticate" | python3 -c "import sys,json; print(json.load(sys.stdin)['auth_token'])")
+        echo "Token obtained (first 20 chars): $${TOKEN:0:20}"
+
+        # Discover the Kafka cluster id via MDS cluster registry.
+        echo "Discovering kafka cluster id..."
+        KID=$$(curl -sf -H "Authorization: Bearer $${TOKEN}" \
+          "$${MDS_URL}/security/1.0/metadataClusterId")
+        # Strip JSON quotes
+        KID=$$(echo "$${KID}" | tr -d '"')
+        echo "kafka-cluster-id=$${KID}"
+
+        # Grant User:mds SystemAdmin over the kafka cluster scope.
+        # This is the bootstrap role binding that allows the product's mds client
+        # (authenticated as User:mds via basic auth) to manage bindings.
+        echo "Granting User:mds SystemAdmin..."
+        curl -sf -X POST \
+          -H "Authorization: Bearer $${TOKEN}" \
+          -H "Content-Type: application/json" \
+          "$${MDS_URL}/security/1.0/principals/User:mds/roles/SystemAdmin" \
+          -d "{\"clusters\":{\"kafka-cluster\":\"$${KID}\"}}"
+        echo ""
+        echo "SystemAdmin granted to User:mds on cluster $${KID}"
+
+        echo "rbac-bootstrap done --- kafka-cluster-id=$${KID}"
+
+volumes:
+  kafka-data:

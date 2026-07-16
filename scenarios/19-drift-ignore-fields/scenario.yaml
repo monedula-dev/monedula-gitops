@@ -1,0 +1,4 @@
+title: Drift ignoreFields
+modes: [cli]
+cluster: shared-sasl
+summary: A topic with drift.ignoreFields excludes the named config key from drift calculation — mutating that key out of band does not make verify fail (contrast with scenario 10).

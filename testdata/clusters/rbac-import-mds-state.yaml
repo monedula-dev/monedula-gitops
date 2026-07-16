@@ -1,0 +1,32 @@
+roleBindings:
+  # Producer: folds into orders producer access.
+  - principal: User:svc-checkout
+    role: DeveloperWrite
+    scopeType: kafka
+    kafkaCluster: lkc-rbac-import
+    resource:
+      type: Topic
+      name: orders
+      patternType: literal
+  # Consumer: folds into orders consumer access (topic-read + group-read paired 1:1).
+  - principal: User:svc-rep
+    role: DeveloperRead
+    scopeType: kafka
+    kafkaCluster: lkc-rbac-import
+    resource:
+      type: Topic
+      name: orders
+      patternType: literal
+  - principal: User:svc-rep
+    role: DeveloperRead
+    scopeType: kafka
+    kafkaCluster: lkc-rbac-import
+    resource:
+      type: Group
+      name: rep-cg
+      patternType: literal
+  # Cluster-scoped: cannot fold -> explicit KafkaRoleBinding.
+  - principal: User:ops-admin
+    role: SystemAdmin
+    scopeType: kafka
+    kafkaCluster: lkc-rbac-import

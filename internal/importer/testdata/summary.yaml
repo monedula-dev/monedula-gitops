@@ -1,0 +1,14 @@
+cluster: prod-eu
+kind: ImportOutput
+summary:
+  accessPolicies: 1
+  policyRules: 1
+  quotas: 0
+  recordNameSubjects: 0
+  roleBindings: 0
+  schemas: 0
+  topicAccessRules: 2
+  topics: 2
+  users: 0
+warnings:
+- principal "User:x" has ambiguous consumer group mapping

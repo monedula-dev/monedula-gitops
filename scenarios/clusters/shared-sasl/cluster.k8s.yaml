@@ -1,0 +1,48 @@
+# KafkaCluster CR for k8s (operator) mode with SASL_PLAINTEXT / SCRAM-SHA-512.
+#
+# Resolves credentials from a Kubernetes Secret (`kafka-credentials`) in the
+# resource's own namespace via secretKeyRef -- the operator's K8sResolver reads
+# these at reconcile time and never sees plaintext in the CR.
+#
+# This CR is named `shared` to match the clusterRef.name used in scenario
+# manifests (01-create-topic, 02-invalid-manifest, 03-webhook-reject-*).
+# It must be applied into the same namespace as the KafkaTopic CRs.
+#
+# The `kafka-credentials` Secret must exist in the same namespace:
+#   kubectl -n <ns> apply -f quickstart/k8s/operator/kafka-credentials.secret.yaml
+# (or the equivalent created inline by test/e2e/k8s/setup.sh).
+#
+# For the CLI / Docker Compose variant see cluster.yaml (uses env: valueFrom).
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: shared
+spec:
+  bootstrapServers: kafka.kafka.svc.cluster.local:9092
+  auth:
+    mechanism: SCRAM-SHA-512
+    scram:
+      username:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-credentials
+            key: kafka-username
+      password:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-credentials
+            key: kafka-password
+  schemaRegistry:
+    endpoint: http://schema-registry.kafka.svc.cluster.local:8081
+    auth:
+      type: basic
+      username:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-credentials
+            key: sr-username
+      password:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-credentials
+            key: sr-password

@@ -1,0 +1,143 @@
+# Monedula CLI quickstart: single-node Kafka (KRaft) + Schema Registry.
+#
+# Security model (DEMO ONLY -- credentials are intentionally fake):
+#   - Kafka client traffic uses SASL_PLAINTEXT / SCRAM-SHA-512.
+#   - Schema Registry REST API uses HTTP Basic auth.
+#
+# SCRAM bootstrap deadlock avoidance:
+#   Creating a SCRAM user normally requires an authenticated admin connection,
+#   but the only admin is the SCRAM user you are trying to create. We break the
+#   cycle by exposing an internal PLAINTEXT listener (INTERNAL://:9094) that is
+#   ALSO the inter-broker listener. The broker therefore starts with NO SCRAM
+#   credential present, and `kafka-init` creates the SCRAM users over that
+#   plaintext listener. Schema Registry then starts after kafka-init succeeds.
+#
+#   The broker still needs a KafkaServer JAAS entry to ENABLE its SASL client
+#   listeners (config/kafka-jaas.conf, wired via KAFKA_OPTS). Because inter-broker
+#   auth is PLAINTEXT, that entry carries NO username/password -- the broker only
+#   declares the ScramLoginModule and validates client logins against the SCRAM
+#   credential store, which lives in Kafka's own metadata once kafka-init has
+#   populated it.
+
+services:
+  kafka:
+    image: confluentinc/cp-kafka:8.0.0
+    hostname: kafka
+    container_name: monedula-quickstart-kafka
+    ports:
+      - "9092:9092"   # CLIENT_HOST (SASL_PLAINTEXT) -- host CLI connects here
+      - "9096:9096"   # CLIENT_KIND (SASL_PLAINTEXT) -- operator-in-kind connects here
+    environment:
+      # --- KRaft single-node (broker + controller in one process) ---
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      CLUSTER_ID: "4L6g3nShT-eMCtK--X86sw"
+
+      # --- Listeners ---
+      # CONTROLLER    : KRaft quorum (PLAINTEXT, internal only)
+      # INTERNAL      : inter-broker + kafka-init admin path (PLAINTEXT)
+      # CLIENT_HOST   : host-facing SASL listener, advertised as localhost:9092
+      # CLIENT_DOCKER : in-network SASL listener, advertised as kafka:9095 (SR)
+      # CLIENT_KIND   : kind-facing SASL listener, advertised as host.docker.internal:9096
+      KAFKA_LISTENERS: "CONTROLLER://:9093,INTERNAL://:9094,CLIENT_HOST://:9092,CLIENT_DOCKER://:9095,CLIENT_KIND://:9096"
+      KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka:9094,CLIENT_HOST://localhost:9092,CLIENT_DOCKER://kafka:9095,CLIENT_KIND://host.docker.internal:9096"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,CLIENT_HOST:SASL_PLAINTEXT,CLIENT_DOCKER:SASL_PLAINTEXT,CLIENT_KIND:SASL_PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+
+      # --- SASL / authorization ---
+      KAFKA_SASL_ENABLED_MECHANISMS: "SCRAM-SHA-512"
+      # Broker-side JAAS that enables the SASL client listeners (see kafka-jaas.conf).
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/secrets/kafka-jaas.conf"
+      KAFKA_AUTHORIZER_CLASS_NAME: "org.apache.kafka.metadata.authorizer.StandardAuthorizer"
+      KAFKA_SUPER_USERS: "User:admin"
+      # Quickstart simplification: allow access when no explicit ACL exists, so
+      # the `monedula` app user works without us pre-creating ACLs per resource.
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "true"
+
+      # --- Misc single-node tuning ---
+      # Default RF for topics created without an explicit replication factor
+      # (the broker resolves the -1 the tool sends to this value).
+      KAFKA_DEFAULT_REPLICATION_FACTOR: "1"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+      - ./config/kafka-jaas.conf:/etc/kafka/secrets/kafka-jaas.conf:ro
+      # Client config so `docker compose exec kafka kafka-topics ...` can talk SASL.
+      - ./config/client.properties:/etc/kafka/secrets/client.properties:ro
+    healthcheck:
+      # Probe over the INTERNAL plaintext listener -- no auth needed.
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "kafka:9094"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  # One-shot job: create the SCRAM users over the PLAINTEXT internal listener.
+  kafka-init:
+    image: confluentinc/cp-kafka:8.0.0
+    container_name: monedula-quickstart-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        kafka-configs --bootstrap-server kafka:9094 --alter \
+          --add-config 'SCRAM-SHA-512=[password=admin-secret]' \
+          --entity-type users --entity-name admin
+        kafka-configs --bootstrap-server kafka:9094 --alter \
+          --add-config 'SCRAM-SHA-512=[password=monedula-secret]' \
+          --entity-type users --entity-name monedula
+        echo "SCRAM users created"
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:8.0.0
+    hostname: schema-registry
+    container_name: monedula-quickstart-schema-registry
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: "schema-registry"
+      SCHEMA_REGISTRY_LISTENERS: "http://0.0.0.0:8081"
+
+      # --- Connect to Kafka over the in-network SASL listener (kafka:9095) ---
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: "SASL_PLAINTEXT://kafka:9095"
+      SCHEMA_REGISTRY_KAFKASTORE_SECURITY_PROTOCOL: "SASL_PLAINTEXT"
+      SCHEMA_REGISTRY_KAFKASTORE_SASL_MECHANISM: "SCRAM-SHA-512"
+      SCHEMA_REGISTRY_KAFKASTORE_SASL_JAAS_CONFIG: 'org.apache.kafka.common.security.scram.ScramLoginModule required username="admin" password="admin-secret";'
+      # Single broker: SR's internal _schemas topic must use RF=1 (default is 3).
+      SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR: "1"
+
+      # --- HTTP Basic auth on the REST API (realm backed by a JAAS file) ---
+      SCHEMA_REGISTRY_AUTHENTICATION_METHOD: "BASIC"
+      SCHEMA_REGISTRY_AUTHENTICATION_REALM: "SchemaRegistry"
+      SCHEMA_REGISTRY_AUTHENTICATION_ROLES: "admin"
+      SCHEMA_REGISTRY_OPTS: "-Djava.security.auth.login.config=/etc/schema-registry/secrets/schema-registry-jaas.conf"
+    volumes:
+      # Mount the realm files referenced by the JAAS config above.
+      - ./config/schema-registry-jaas.conf:/etc/schema-registry/secrets/schema-registry-jaas.conf:ro
+      - ./config/sr-password.properties:/etc/schema-registry/secrets/sr-password.properties:ro
+    healthcheck:
+      # Probe the REST API with credentials; 401 means SR is up but credentials
+      # are wrong (shouldn't happen), 200 means fully ready.  We accept both 200
+      # and 401 as "service is listening" so the check passes even if the JAAS
+      # config has an unexpected issue — the scenario test will surface the real
+      # auth error. The critical thing is that SR is accepting TCP connections.
+      test: ["CMD-SHELL", "curl -sf -u sr:sr-secret http://localhost:8081/subjects || curl -sf http://localhost:8081/subjects -o /dev/null -w '%{http_code}' | grep -q '401'"]
+      interval: 5s
+      timeout: 10s
+      retries: 18
+      start_period: 15s
+
+volumes:
+  kafka-data:

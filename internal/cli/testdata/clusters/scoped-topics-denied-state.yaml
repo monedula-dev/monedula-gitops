@@ -1,0 +1,6 @@
+# Inverse of scoped-state.yaml: a credential that can manage quotas but has no
+# topic describe rights. A quota-only manifest set must diff/apply cleanly —
+# the ListTopics read is scoped away when no KafkaTopic is declared.
+failures:
+  - method: ListTopics
+    error: "listing topics: CLUSTER_AUTHORIZATION_FAILED: Cluster authorization failed."

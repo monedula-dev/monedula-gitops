@@ -1,0 +1,4 @@
+title: IP connection-rate quota
+modes: [cli, k8s]
+cluster: shared-sasl
+summary: Apply a KafkaQuota capping new-connection creation rate from a specific IP address and verify it via the broker quota API.

@@ -1,0 +1,19 @@
+# Schema Registry mock state: subject payments.orders-value already exists with
+# the SAME schema definition as the manifest's orders-value.avsc (so NO
+# RegisterSchema drift — schemaEqual canonicalizes the JSON), but with
+# compatibility FULL (rank 3). The manifest desires BACKWARD (rank 1), which is
+# strictly lower -> exactly one LowerSchemaCompatibility op (destructive, gated).
+subjects:
+  - subject: payments.orders-value
+    type: AVRO
+    compatibility: FULL
+    definition: |
+      {
+        "type": "record",
+        "name": "Order",
+        "namespace": "payments",
+        "fields": [
+          {"name": "id", "type": "string"},
+          {"name": "amount", "type": "long"}
+        ]
+      }

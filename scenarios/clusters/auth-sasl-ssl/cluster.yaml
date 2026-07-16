@@ -1,0 +1,27 @@
+# KafkaCluster CR for CLI mode (docker compose) with SASL_SSL / SCRAM-SHA-512.
+#
+# The CLI verifies the broker's server cert against the dev CA via tls.caCert
+# (a file ref, resolved relative to this cluster-config file). See
+# cluster.k8s.yaml for the k8s form that wires the same CA via a secretKeyRef.
+#
+# Environment variables required:
+#   export KAFKA_USERNAME=admin
+#   export KAFKA_PASSWORD=admin-secret
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: shared
+spec:
+  bootstrapServers: localhost:9092
+  tls:
+    enabled: true
+    caCert: { valueFrom: { file: certs/ca.crt } }
+  auth:
+    mechanism: SCRAM-SHA-512
+    scram:
+      username:
+        valueFrom:
+          env: KAFKA_USERNAME
+      password:
+        valueFrom:
+          env: KAFKA_PASSWORD

@@ -1,0 +1,13 @@
+cli:
+  apply:
+    exitCode: 0
+    outputContains: ["tls.demo"]
+k8s:
+  conditions:
+    - kind: KafkaTopic
+      name: tls-demo
+      type: Ready
+      status: "True"
+liveState:
+  topics:
+    - name: tls.demo

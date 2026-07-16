@@ -1,0 +1,11 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaUser
+metadata:
+  name: svc-orders-app
+spec:
+  clusterRef:
+    name: shared
+  username: svc-orders-app
+  mechanism: SCRAM-SHA-512
+  password:
+    generate: {}

@@ -1,0 +1,39 @@
+# Sample KafkaCluster pointing at the in-cluster quickstart Kafka + Schema
+# Registry (quickstart/k8s/kafka/). All credentials are resolved from the
+# kafka-credentials Secret in this namespace via secretKeyRef -- the operator
+# never sees plaintext in the CR. SASL_PLAINTEXT/SCRAM-SHA-512 is used, so no
+# TLS block is present.
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: demo
+  namespace: monedula-demo
+spec:
+  bootstrapServers: kafka.kafka.svc.cluster.local:9092
+  auth:
+    mechanism: SCRAM-SHA-512
+    scram:
+      username:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-credentials
+            key: kafka-username
+      password:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-credentials
+            key: kafka-password
+  schemaRegistry:
+    endpoint: http://schema-registry.kafka.svc.cluster.local:8081
+    auth:
+      type: basic
+      username:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-credentials
+            key: sr-username
+      password:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-credentials
+            key: sr-password

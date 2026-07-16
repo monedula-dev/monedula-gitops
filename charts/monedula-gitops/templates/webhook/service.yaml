@@ -1,0 +1,16 @@
+{{- if .Values.webhook.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "monedula-gitops.fullname" . }}-webhook
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "monedula-gitops.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "monedula-gitops.selectorLabels" . | nindent 4 }}
+  ports:
+  - port: 443
+    targetPort: webhook
+    protocol: TCP
+{{- end }}

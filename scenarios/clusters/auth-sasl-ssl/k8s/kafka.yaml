@@ -1,0 +1,246 @@
+# Monedula e2e scenario cluster: single-node Kafka (KRaft) with SASL_SSL / SCRAM-SHA-512.
+#
+# Security model (DEV ONLY -- certs and credentials are intentionally fake):
+#   - Kafka CLIENT traffic uses SASL_SSL / SCRAM-SHA-512 on :9092.
+#   - INTERNAL traffic (inter-broker + SCRAM bootstrap) is PLAINTEXT on :9094.
+#   - Schema Registry is NOT included in this profile.
+#
+# Prerequisites:
+#   1. Apply k8s/kafka-tls-secret.yaml (with real base64 values) to create the
+#      kafka-tls and kafka-ca Secrets in namespace kafka.
+#   2. Apply this file. The init container combines server.crt + server.key into
+#      a PEM keystore file before the broker starts.
+#
+# SCRAM bootstrap deadlock avoidance: same as shared-sasl.
+#   The kafka-scram-bootstrap Job creates SCRAM users over the PLAINTEXT INTERNAL
+#   listener (:9094) before any SASL_SSL client can authenticate.
+---
+# Broker-side JAAS: enables the SASL_SSL CLIENT listener. No username/password;
+# SCRAM client logins validate against the broker's credential store.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-jaas
+  namespace: kafka
+data:
+  kafka-jaas.conf: |
+    KafkaServer {
+      org.apache.kafka.common.security.scram.ScramLoginModule required;
+    };
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: kafka
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/part-of: monedula-e2e
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: kafka
+  ports:
+    - name: client          # SASL_SSL / SCRAM-SHA-512
+      port: 9092
+      targetPort: 9092
+    - name: internal        # PLAINTEXT inter-broker + SCRAM bootstrap path
+      port: 9094
+      targetPort: 9094
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: kafka
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/part-of: monedula-e2e
+spec:
+  serviceName: kafka
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kafka
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka
+        app.kubernetes.io/part-of: monedula-e2e
+    spec:
+      initContainers:
+        # Combine server.crt + server.key into a PEM keystore file before the
+        # broker starts. The broker reads ssl.keystore.location which points here.
+        - name: build-pem-keystore
+          image: confluentinc/cp-kafka:8.0.0
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              cat /tls-secret/server.crt /tls-secret/server.key > /etc/kafka/secrets/server-keystore.pem
+              chmod 600 /etc/kafka/secrets/server-keystore.pem
+              echo "PEM keystore written to /etc/kafka/secrets/server-keystore.pem"
+          volumeMounts:
+            - name: tls-secret
+              mountPath: /tls-secret
+              readOnly: true
+            - name: kafka-secrets
+              mountPath: /etc/kafka/secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+      containers:
+        - name: kafka
+          image: confluentinc/cp-kafka:8.0.0
+          ports:
+            - name: client
+              containerPort: 9092
+            - name: internal
+              containerPort: 9094
+          env:
+            # --- KRaft single-node (broker + controller in one process) ---
+            - name: KAFKA_NODE_ID
+              value: "1"
+            - name: KAFKA_PROCESS_ROLES
+              value: "broker,controller"
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: "1@localhost:9093"
+            - name: CLUSTER_ID
+              value: "4L6g3nShT-eMCtK--X86sw"
+
+            # --- Listeners ---
+            # CONTROLLER : KRaft quorum (PLAINTEXT, intra-pod only)
+            # INTERNAL   : inter-broker + SCRAM bootstrap path (PLAINTEXT)
+            # CLIENT     : SASL_SSL listener for the operator
+            - name: KAFKA_LISTENERS
+              value: "CONTROLLER://:9093,INTERNAL://:9094,CLIENT://:9092"
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "INTERNAL://kafka.kafka.svc.cluster.local:9094,CLIENT://kafka.kafka.svc.cluster.local:9092"
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: "CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,CLIENT:SASL_SSL"
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: "CONTROLLER"
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: "INTERNAL"
+
+            # --- SASL / authorization ---
+            - name: KAFKA_SASL_ENABLED_MECHANISMS
+              value: "SCRAM-SHA-512"
+            - name: KAFKA_OPTS
+              value: "-Djava.security.auth.login.config=/etc/kafka/secrets/kafka-jaas.conf"
+            - name: KAFKA_AUTHORIZER_CLASS_NAME
+              value: "org.apache.kafka.metadata.authorizer.StandardAuthorizer"
+            - name: KAFKA_SUPER_USERS
+              value: "User:admin"
+            - name: KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND
+              value: "true"
+
+            # --- TLS (PEM keystore, Apache Kafka 3.x / cp-kafka 8.x) ---
+            # The init container writes server.crt + server.key to this path.
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: "PEM"
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: "/etc/kafka/secrets/server-keystore.pem"
+            - name: KAFKA_SSL_CLIENT_AUTH
+              value: "none"
+
+            # --- Misc single-node tuning ---
+            - name: KAFKA_DEFAULT_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+            - name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
+              value: "0"
+          readinessProbe:
+            exec:
+              command:
+                - kafka-broker-api-versions
+                - --bootstrap-server
+                - localhost:9094
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 12
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            - name: kafka-data
+              mountPath: /var/lib/kafka/data
+            - name: kafka-jaas
+              mountPath: /etc/kafka/secrets/kafka-jaas.conf
+              subPath: kafka-jaas.conf
+              readOnly: true
+            # Secrets dir shared with init container (contains server-keystore.pem).
+            - name: kafka-secrets
+              mountPath: /etc/kafka/secrets
+      volumes:
+        - name: kafka-data
+          emptyDir: {}
+        - name: kafka-jaas
+          configMap:
+            name: kafka-jaas
+        - name: tls-secret
+          secret:
+            secretName: kafka-tls
+        # Ephemeral writable dir shared between init + main container for the
+        # combined PEM keystore (not mountable from a read-only Secret directly).
+        - name: kafka-secrets
+          emptyDir: {}
+---
+# One-shot Job: create the SCRAM users over the PLAINTEXT INTERNAL listener.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-scram-bootstrap
+  namespace: kafka
+  labels:
+    app.kubernetes.io/name: kafka-scram-bootstrap
+    app.kubernetes.io/part-of: monedula-e2e
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka-scram-bootstrap
+        app.kubernetes.io/part-of: monedula-e2e
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: bootstrap
+          image: confluentinc/cp-kafka:8.0.0
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              echo "Waiting for kafka:9094 (PLAINTEXT internal listener)..."
+              until kafka-broker-api-versions --bootstrap-server kafka.kafka.svc.cluster.local:9094 >/dev/null 2>&1; do
+                echo "  kafka not ready yet, retrying in 5s"
+                sleep 5
+              done
+              echo "Kafka is up. Creating SCRAM users..."
+              kafka-configs --bootstrap-server kafka.kafka.svc.cluster.local:9094 --alter \
+                --add-config 'SCRAM-SHA-512=[password=admin-secret]' \
+                --entity-type users --entity-name admin
+              kafka-configs --bootstrap-server kafka.kafka.svc.cluster.local:9094 --alter \
+                --add-config 'SCRAM-SHA-512=[password=monedula-secret]' \
+                --entity-type users --entity-name monedula
+              echo "SCRAM users created (admin, monedula)"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi

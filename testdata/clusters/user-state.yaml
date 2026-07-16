@@ -1,0 +1,9 @@
+# Fresh state for the KafkaUser acceptance tests: the declared user
+# (svc-payments) has no credential, and an entirely undeclared live user
+# exists to prove the diff never touches out-of-scope principals.
+topics: []
+acls: []
+scramCredentials:
+  - user: legacy-analytics
+    mechanism: SCRAM-SHA-256
+    iterations: 4096

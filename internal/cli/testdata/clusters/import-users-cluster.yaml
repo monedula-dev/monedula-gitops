@@ -1,0 +1,17 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: impusers
+  annotations:
+    gitops.monedula.dev/mock-state-file: import-users-state.yaml
+spec:
+  bootstrapServers: localhost:9092
+  auth:
+    mechanism: SCRAM-SHA-512
+    scram:
+      username:
+        valueFrom:
+          env: IMPORT_USERS_TEST_USER
+      password:
+        valueFrom:
+          env: IMPORT_USERS_TEST_PASS

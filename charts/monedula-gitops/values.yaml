@@ -1,0 +1,88 @@
+# Operator image. tag defaults to .Chart.AppVersion when empty.
+image:
+  repository: ghcr.io/monedula-dev/monedula-gitops
+  tag: ""
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+replicaCount: 1
+
+# Operator flags.
+clusterNamespace: ""   # --cluster-namespace; empty = resolve KafkaCluster in the resource's own namespace
+logLevel: warn         # error | warn | info | debug
+leaderElection:
+  enabled: true
+resyncInterval: ""             # --resync-interval; empty omits the flag (operator default 5m; minimum 30s)
+# --max-concurrent-reconciles; empty omits the flag (operator default 1). Values >1 REQUIRE
+# leaderElection.enabled=true: concurrency relies on the operator's in-process locking, so a
+# second active replica would race it — the chart refuses to render (and the operator refuses
+# to start) with >1 while leader election is disabled.
+maxConcurrentReconciles: ""
+
+serviceAccount:
+  create: true
+  name: ""             # defaults to the chart fullname
+  annotations: {}      # e.g. eks.amazonaws.com/role-arn for IRSA (pairs with OAUTHBEARER)
+
+rbac:
+  create: true
+
+crds:
+  enabled: true        # render CRDs into templates/
+  keep: true           # add helm.sh/resource-policy: keep so uninstall does not delete CRs
+
+webhook:
+  enabled: false       # opt-in; cert-free by default (matches --enable-webhooks default)
+  failurePolicy: Fail
+  certManager:
+    enabled: true      # cert-manager issues + injects the serving cert (prerequisite)
+  certSecretName: ""   # defaults to <fullname>-webhook-serving-cert
+  caBundle: ""         # BYO mode (certManager.enabled=false): base64 CA bundle
+
+metrics:
+  secure: false         # --metrics-secure; requires TokenReview/SubjectAccessReview RBAC (granted unconditionally)
+  service:
+    enabled: true
+    port: 8080
+  serviceMonitor:
+    enabled: false        # Prometheus Operator ServiceMonitor
+    interval: ""          # scrape interval, e.g. 30s; empty = Prometheus default
+    scheme: ""             # empty = "http", or "https" when metrics.secure (set explicitly to override)
+    bearerTokenSecret: {}  # {name, key} — Prometheus ServiceAccount token Secret for authenticating to a secure endpoint
+    tlsConfig: {}          # e.g. {insecureSkipVerify: true} when the metrics server uses a self-signed cert
+    relabelings: []
+    metricRelabelings: []
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+podAnnotations: {}
+podLabels: {}
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+    - ALL
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""
+
+extraArgs: []
+extraEnv: []
+extraVolumes: []
+extraVolumeMounts: []  # each entry needs a matching extraVolumes entry
+
+nameOverride: ""
+fullnameOverride: ""

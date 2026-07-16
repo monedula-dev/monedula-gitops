@@ -1,0 +1,4 @@
+title: Detect and reconcile config drift
+modes: [cli]
+cluster: shared-sasl
+summary: Demonstrates the GitOps detect-then-converge loop — apply desired state, simulate out-of-band config drift on the broker, verify reports drift (exit 1), then re-apply to reconcile and verify clean (exit 0).

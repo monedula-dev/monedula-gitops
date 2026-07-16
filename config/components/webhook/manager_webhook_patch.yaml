@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: monedula-controller-manager
+  namespace: monedula-system
+spec:
+  template:
+    spec:
+      containers:
+      - name: manager
+        args:
+        - operator
+        - --metrics-bind-address=:8080
+        - --health-probe-bind-address=:8081
+        - --leader-elect
+        - --enable-webhooks
+        - --webhook-cert-dir=/tmp/k8s-webhook-server/serving-certs
+        ports:
+        - name: metrics
+          containerPort: 8080
+          protocol: TCP
+        - name: health
+          containerPort: 8081
+          protocol: TCP
+        - name: webhook
+          containerPort: 9443
+          protocol: TCP
+        volumeMounts:
+        - name: webhook-serving-cert
+          mountPath: /tmp/k8s-webhook-server/serving-certs
+          readOnly: true
+      volumes:
+      - name: webhook-serving-cert
+        secret:
+          secretName: monedula-gitops-webhook-serving-cert
+          defaultMode: 0444

@@ -1,0 +1,11 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: rn
+  annotations:
+    gitops.monedula.dev/mock-state-file: recordname-state.yaml
+    gitops.monedula.dev/mock-schema-file: recordname-sr.yaml
+spec:
+  bootstrapServers: localhost:9092
+  schemaRegistry:
+    endpoint: http://sr

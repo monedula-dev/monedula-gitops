@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Webhook-enabled install target (cert-manager must be pre-installed):
+#   kubectl apply -k github.com/monedula-dev/monedula-gitops/config/overlays/webhook?ref=vX
+resources:
+- ../../default
+
+components:
+- ../../components/webhook

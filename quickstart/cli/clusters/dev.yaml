@@ -1,0 +1,25 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: local
+spec:
+  bootstrapServers: localhost:9092
+  auth:
+    mechanism: SCRAM-SHA-512
+    scram:
+      username:
+        valueFrom:
+          env: KAFKA_USERNAME
+      password:
+        valueFrom:
+          env: KAFKA_PASSWORD
+  schemaRegistry:
+    endpoint: http://localhost:8081
+    auth:
+      type: basic
+      username:
+        valueFrom:
+          env: SR_USERNAME
+      password:
+        valueFrom:
+          env: SR_PASSWORD

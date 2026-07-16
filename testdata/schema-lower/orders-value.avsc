@@ -1,0 +1,9 @@
+{
+  "type": "record",
+  "name": "Order",
+  "namespace": "payments",
+  "fields": [
+    {"name": "id", "type": "string"},
+    {"name": "amount", "type": "long"}
+  ]
+}

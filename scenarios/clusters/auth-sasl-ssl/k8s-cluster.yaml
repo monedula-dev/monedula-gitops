@@ -1,0 +1,34 @@
+# k8s-shaped KafkaCluster CR for the auth-sasl-ssl profile (operator mode).
+# The in-kind operator connects to the host compose broker as
+# host.docker.internal:9100 (the CLIENTKIND SASL_SSL listener). The CA comes
+# from the kafka-sasl-ssl Secret created by setup_auth_profile and is verified
+# via tls.caCert (a secretKeyRef), just as CLI mode verifies it via a file ref.
+# SCRAM creds (admin/admin-secret) also come from the Secret.
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: shared
+  labels:
+    app.kubernetes.io/part-of: monedula-e2e
+spec:
+  bootstrapServers: host.docker.internal:9100
+  tls:
+    enabled: true
+    caCert:
+      valueFrom:
+        secretKeyRef:
+          name: kafka-sasl-ssl
+          key: ca.crt
+  auth:
+    mechanism: SCRAM-SHA-512
+    scram:
+      username:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-sasl-ssl
+            key: scram-username
+      password:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-sasl-ssl
+            key: scram-password

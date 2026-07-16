@@ -1,0 +1,28 @@
+# k8s-shaped KafkaCluster CR for the auth-oauth profile (operator mode).
+# The in-kind operator connects to host.docker.internal:9098 (CLIENTKIND) and
+# fetches tokens from the mock OIDC server at host.docker.internal:8080, whose
+# issuer matches the CLIENTKIND per-listener EXPECTED_ISSUER override. Creds come
+# from the kafka-oauth Secret created by setup_auth_profile.
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: shared
+  labels:
+    app.kubernetes.io/part-of: monedula-e2e
+spec:
+  bootstrapServers: host.docker.internal:9098
+  auth:
+    mechanism: OAUTHBEARER
+    oauth:
+      tokenEndpoint: http://host.docker.internal:8080/default/token
+      clientId:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-oauth
+            key: client-id
+      clientSecret:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-oauth
+            key: client-secret
+      scope: kafka

@@ -1,0 +1,27 @@
+# DEV ONLY — seed LDAP users for Monedula MDS/RBAC scenario.
+# MDS-admin user (the product authenticates to MDS as this user):
+dn: uid=mds,dc=monedula,dc=dev
+objectClass: inetOrgPerson
+objectClass: top
+cn: MDS Admin
+sn: Admin
+uid: mds
+userPassword: mds-secret
+
+# Role-binding subject (used in the KafkaRoleBinding scenario):
+dn: uid=svc-checkout,dc=monedula,dc=dev
+objectClass: inetOrgPerson
+objectClass: top
+cn: Checkout Service
+sn: Service
+uid: svc-checkout
+userPassword: checkout-secret
+
+# Kafka super-admin user for the client listener:
+dn: uid=kafka-admin,dc=monedula,dc=dev
+objectClass: inetOrgPerson
+objectClass: top
+cn: Kafka Admin
+sn: Admin
+uid: kafka-admin
+userPassword: kafka-admin-secret

@@ -1,0 +1,4 @@
+title: Connect to a SASL_SSL (SCRAM-over-TLS) cluster
+modes: [cli, k8s]
+cluster: auth-sasl-ssl
+summary: Apply a KafkaTopic to a SASL_SSL cluster to verify TLS + SCRAM authentication works end-to-end.

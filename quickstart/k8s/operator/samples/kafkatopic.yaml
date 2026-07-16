@@ -1,0 +1,35 @@
+# Sample KafkaTopic managed by the operator. Schema-free on purpose: schema
+# sync via a `file:` ref is unsupported in operator mode (it would set
+# SchemaSynced=False). Registering a schema via secretKeyRef is possible but out
+# of scope for this sample.
+#
+# deletionPolicy: Orphan keeps the Kafka topic if this CR is deleted. The README
+# deletion demo flips this to Delete and adds the
+# gitops.monedula.dev/allow-delete=true annotation to actually remove it.
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaTopic
+metadata:
+  name: orders
+  namespace: monedula-demo
+spec:
+  clusterRef:
+    name: demo
+  topicName: payments.orders
+  partitions: 3
+  config:
+    retention.ms: "604800000"
+  access:
+    producers:
+    - principal: User:orders-service
+      operations:
+      - Write
+    consumers:
+    - principal: User:billing-service
+      group: billing-consumers
+      topicOperations:
+      - Read
+      groupOperations:
+      - Read
+  reconciliation:
+    mode: Enforce
+  deletionPolicy: Orphan
