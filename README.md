@@ -34,7 +34,7 @@ Monedula GitOps makes the desired state explicit as version-controlled YAML and 
 
 ### A topic and its access in one place
 
-The design goal was to be *simpler* than the alternatives for the case you hit every day. Most Kafka tooling keeps a topic in one place and its access in another: Strimzi splits them across `KafkaTopic` and `KafkaUser`, Confluent for Kubernetes and Jikkou put ACLs in separate principal/role resources, and Terraform models every ACL as its own resource. Even the tools that keep everything in one file (JulieOps, kafka-gitops) anchor access on the *application or project*, not the topic. Keeping two separate objects in sync is the tedious, drift-prone part.
+The design goal was to be *simpler* than the alternatives for the case you hit every day. Most Kafka tooling keeps a topic in one place and its access in another: Strimzi splits them across `KafkaTopic` and `KafkaUser`, Confluent for Kubernetes routes access through separate role-binding resources and Jikkou puts ACLs in separate principal resources, and Terraform models every ACL as its own resource. Even the tools that keep everything in one file (JulieOps, kafka-gitops) anchor access on the *application or project*, not the topic. Keeping two separate objects in sync is the tedious, drift-prone part.
 
 Monedula GitOps attaches access to the **topic itself** — the common case (a topic plus the apps that produce to and consume from it) is a single manifest:
 
@@ -115,15 +115,19 @@ not in CI.**
 |------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | **monedula-gitops** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Strimzi | ❌ | ✅ | ✅ (KafkaUser) | ✅ (KafkaUser) | ✅ (KafkaUser) | ❌ | ❌ | ❌ | ✅ | partial | ❌ |
-| Confluent for Kubernetes | ❌ | ✅ | ✅ | ⚠️ (Secret-based, PLAIN-focused) | ❌ | ✅ | ✅ | ❌ | ✅ | partial | ❌ |
-| Jikkou | ❌ | ✅ | ✅ | ✅ (KafkaUser, SCRAM) | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ |
-| JulieOps | ⚠️ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ❌ | partial | ❌ |
-| kafka-gitops (devshawn) | ⚠️ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ✅ | ❌ |
+| Confluent for Kubernetes | ❌ | ✅ | ⚠️ (no ACL CR; RBAC) | ⚠️ (Secret-based, PLAIN-focused) | ❌ | ✅ | ✅ | ❌ | ✅ | partial | ❌ |
+| Jikkou | ❌ | ✅ | ✅ | ✅ (KafkaUser, SCRAM) | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
+| JulieOps | ⚠️ | ✅ | ✅ | ⚠️ (CC service accounts) | ✅ | ✅ | ✅ | ✅ | ❌ | partial | ❌ |
+| kafka-gitops (devshawn) | ⚠️ | ✅ | ✅ | ⚠️ (CC service accounts) | ❌ | ❌ | ❌ | ✅ | ❌ | ✅ | ❌ |
 | terraform-provider-kafka | ❌ | ✅ | ✅ | ✅ (`kafka_user_scram_credential`) | ✅ | ❌ | ❌ | ✅ (TF) | ❌ | ✅ (TF state) | ✅ (TF import) |
 
 > **Topic+access together**: ✅ = producer/consumer access is declared on the topic itself; ⚠️ = access lives in the same file but is anchored on an application/project rather than the topic; ❌ = topics and access are separate objects.
 >
-> **Principals (SCRAM)**: ✅ = the tool can create/rotate a broker-side SCRAM credential declaratively; ⚠️ = partial or adjacent support (e.g. Secret-backed credentials for a narrower mechanism); ❌ = the tool assumes principals already exist and manages only their authorization.
+> **ACLs**: ⚠️ = no declarative ACL resource; ACLs are configured on the cluster (authorizer, super users) or applied out-of-band, and the tool's own access model is Confluent RBAC role bindings.
+>
+> **Principals (SCRAM)**: ✅ = the tool can create/rotate a broker-side SCRAM credential declaratively; ⚠️ = partial or adjacent support (e.g. Secret-backed credentials for a narrower mechanism, or Confluent Cloud service accounts rather than broker-side SCRAM); ❌ = the tool assumes principals already exist and manages only their authorization.
+>
+> **Operator**: ✅ = runs in-cluster as a controller that watches custom resources and reconciles continuously; ❌ = invoked — CLI, CI job, or a request-driven server. Jikkou can be deployed on Kubernetes as an API server and borrows kubectl's resource-definition style, but it does not watch or reconcile CRDs.
 >
 > Comparison reflects each tool's primary focus at the time of writing; capabilities evolve — see each project's documentation.
 
