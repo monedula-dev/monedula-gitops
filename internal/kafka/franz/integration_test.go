@@ -113,16 +113,28 @@ func TestIntegration_TopicRoundTrip(t *testing.T) {
 	}
 	require.NoError(t, client.CreateTopic(ctx, spec))
 
-	got, err := client.GetTopic(ctx, name)
-	require.NoError(t, err)
-	require.NotNil(t, got, "GetTopic returned nil for a topic we just created")
-	assert.Equal(t, 3, got.Partitions)
-	assert.Equal(t, 1, got.ReplicationFactor)
-	assert.Equal(t, "604800000", got.Config["retention.ms"])
+	// Read-back poll, same reason as the other mutate-then-read tests here: the
+	// create is answered on controller commit, the describe is served from the
+	// broker's metadata image a few tens of milliseconds later. Only the reads
+	// are retried; the assertions are unchanged.
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		got, err := client.GetTopic(ctx, name)
+		if !assert.NoError(c, err) {
+			return
+		}
+		if !assert.NotNil(c, got, "GetTopic returned nil for a topic we just created") {
+			return
+		}
+		assert.Equal(c, 3, got.Partitions)
+		assert.Equal(c, 1, got.ReplicationFactor)
+		assert.Equal(c, "604800000", got.Config["retention.ms"])
 
-	all, err := client.ListTopics(ctx)
-	require.NoError(t, err)
-	assert.True(t, containsTopic(all, name), "ListTopics did not include %q", name)
+		all, err := client.ListTopics(ctx)
+		if !assert.NoError(c, err) {
+			return
+		}
+		assert.True(c, containsTopic(all, name), "ListTopics did not include %q", name)
+	}, 30*time.Second, 100*time.Millisecond)
 }
 
 func TestIntegration_UpdateTopicConfig(t *testing.T) {
@@ -289,19 +301,33 @@ func TestIntegration_ACLRoundTrip(t *testing.T) {
 			require.NoError(t, client.CreateACLs(ctx, []kafka.ACLState{acl}),
 				"CreateACLs failed for %s/%s", rt.typ, perm)
 
-			list, err := client.ListACLs(ctx)
-			require.NoError(t, err)
-			assert.True(t, aclPresent(list, acl),
-				"ListACLs did not return the created %s/%s ACL (symmetry failure): %+v\nlisted: %+v",
-				rt.typ, perm, acl, list)
+			// Read-back polls, for the same reason as the topic-config and quota
+			// tests: CreateAcls/DeleteAcls are answered when the KRaft controller
+			// commits, but DescribeAcls is served from the broker's metadata
+			// image, which applies the record a few tens of milliseconds later.
+			// Only the read is retried — the mutation above is not — and the
+			// assertions are unchanged.
+			require.EventuallyWithT(t, func(c *assert.CollectT) {
+				list, err := client.ListACLs(ctx)
+				if !assert.NoError(c, err) {
+					return
+				}
+				assert.True(c, aclPresent(list, acl),
+					"ListACLs did not return the created %s/%s ACL (symmetry failure): %+v\nlisted: %+v",
+					rt.typ, perm, acl, list)
+			}, 30*time.Second, 100*time.Millisecond)
 
 			require.NoError(t, client.DeleteACLs(ctx, []kafka.ACLState{acl}),
 				"DeleteACLs failed for %s/%s", rt.typ, perm)
 
-			list, err = client.ListACLs(ctx)
-			require.NoError(t, err)
-			assert.False(t, aclPresent(list, acl),
-				"ListACLs still returned the %s/%s ACL after delete", rt.typ, perm)
+			require.EventuallyWithT(t, func(c *assert.CollectT) {
+				list, err := client.ListACLs(ctx)
+				if !assert.NoError(c, err) {
+					return
+				}
+				assert.False(c, aclPresent(list, acl),
+					"ListACLs still returned the %s/%s ACL after delete", rt.typ, perm)
+			}, 30*time.Second, 100*time.Millisecond)
 		}
 	}
 }
@@ -330,21 +356,36 @@ func TestIntegration_ACLHostDefaulting(t *testing.T) {
 	}
 	require.NoError(t, client.CreateACLs(ctx, []kafka.ACLState{created}))
 
-	list, err := client.ListACLs(ctx)
-	require.NoError(t, err)
-
 	// The same tuple but with host "*" — what the broker should report.
 	starHost := created
 	starHost.Host = "*"
-	assert.True(t, aclPresent(list, starHost),
-		"empty-host Allow ACL should be reported with host %q; listed: %+v", "*", list)
+
+	// Read-back polls: DescribeAcls is served from the broker's metadata image,
+	// which lags the controller commit that CreateAcls/DeleteAcls waits on. The
+	// delete read-back below is the one that actually failed in CI, on
+	// apache/kafka 4.3.1 — "ACL not removed after DeleteACLs" — while passing
+	// locally, which is the signature of that race rather than a real defect.
+	// Only reads are retried; the assertions are unchanged.
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		list, err := client.ListACLs(ctx)
+		if !assert.NoError(c, err) {
+			return
+		}
+		assert.True(c, aclPresent(list, starHost),
+			"empty-host Allow ACL should be reported with host %q; listed: %+v", "*", list)
+	}, 30*time.Second, 100*time.Millisecond)
 
 	// Delete using the explicit "*" host (filter mode requires explicit host).
 	require.NoError(t, client.DeleteACLs(ctx, []kafka.ACLState{starHost}))
 
-	list, err = client.ListACLs(ctx)
-	require.NoError(t, err)
-	assert.False(t, aclPresent(list, starHost), "ACL not removed after DeleteACLs with host %q", "*")
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		list, err := client.ListACLs(ctx)
+		if !assert.NoError(c, err) {
+			return
+		}
+		assert.False(c, aclPresent(list, starHost),
+			"ACL not removed after DeleteACLs with host %q", "*")
+	}, 30*time.Second, 100*time.Millisecond)
 }
 
 // --- End-to-end converge ---
@@ -597,12 +638,22 @@ func TestIntegration_ScramCredentialRoundTrip(t *testing.T) {
 		Password:  "s3cr3t-password-value",
 	}), "UpsertScramCredential failed")
 
-	list, err := client.ListScramCredentials(ctx, user)
-	require.NoError(t, err, "ListScramCredentials after upsert failed")
-	require.Len(t, list, 1, "expected exactly one credential for %q", user)
-	assert.Equal(t, user, list[0].User)
-	assert.Equal(t, "SCRAM-SHA-512", list[0].Mechanism)
-	assert.Greater(t, list[0].Iterations, int32(0), "Iterations must resolve to the adapter's default, not 0")
+	// Read-back polls throughout: AlterUserScramCredentials is answered on
+	// controller commit, DescribeUserScramCredentials is served from the
+	// broker's metadata image slightly later. Only reads are retried; every
+	// assertion below is unchanged.
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		list, err := client.ListScramCredentials(ctx, user)
+		if !assert.NoError(c, err, "ListScramCredentials after upsert failed") {
+			return
+		}
+		if !assert.Len(c, list, 1, "expected exactly one credential for %q", user) {
+			return
+		}
+		assert.Equal(c, user, list[0].User)
+		assert.Equal(c, "SCRAM-SHA-512", list[0].Mechanism)
+		assert.Greater(c, list[0].Iterations, int32(0), "Iterations must resolve to the adapter's default, not 0")
+	}, 30*time.Second, 100*time.Millisecond)
 
 	// A second mechanism for the same user is independent.
 	require.NoError(t, client.UpsertScramCredential(ctx, kafka.ScramUpsert{
@@ -612,26 +663,40 @@ func TestIntegration_ScramCredentialRoundTrip(t *testing.T) {
 		Password:   "another-password-value",
 	}), "UpsertScramCredential (second mechanism) failed")
 
-	list, err = client.ListScramCredentials(ctx, user)
-	require.NoError(t, err)
-	require.Len(t, list, 2, "expected both mechanisms listed for %q", user)
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		list, err := client.ListScramCredentials(ctx, user)
+		if !assert.NoError(c, err) {
+			return
+		}
+		assert.Len(c, list, 2, "expected both mechanisms listed for %q", user)
+	}, 30*time.Second, 100*time.Millisecond)
 
 	// DeleteScramCredential removes only the targeted mechanism.
 	require.NoError(t, client.DeleteScramCredential(ctx, user, "SCRAM-SHA-256"),
 		"DeleteScramCredential failed")
 
-	list, err = client.ListScramCredentials(ctx, user)
-	require.NoError(t, err, "ListScramCredentials after delete failed")
-	require.Len(t, list, 1, "expected only SCRAM-SHA-512 to remain for %q", user)
-	assert.Equal(t, "SCRAM-SHA-512", list[0].Mechanism)
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		list, err := client.ListScramCredentials(ctx, user)
+		if !assert.NoError(c, err, "ListScramCredentials after delete failed") {
+			return
+		}
+		if !assert.Len(c, list, 1, "expected only SCRAM-SHA-512 to remain for %q", user) {
+			return
+		}
+		assert.Equal(c, "SCRAM-SHA-512", list[0].Mechanism)
+	}, 30*time.Second, 100*time.Millisecond)
 
 	// Deleting the remaining mechanism leaves the user with none, so a
 	// filtered ListScramCredentials for that user returns empty (absent, not
 	// an error).
 	require.NoError(t, client.DeleteScramCredential(ctx, user, "SCRAM-SHA-512"))
-	list, err = client.ListScramCredentials(ctx, user)
-	require.NoError(t, err)
-	assert.Empty(t, list, "user with no remaining SCRAM credentials must not appear in ListScramCredentials")
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		list, err := client.ListScramCredentials(ctx, user)
+		if !assert.NoError(c, err) {
+			return
+		}
+		assert.Empty(c, list, "user with no remaining SCRAM credentials must not appear in ListScramCredentials")
+	}, 30*time.Second, 100*time.Millisecond)
 }
 
 // TestIntegration_ScramCredentialUnknownMechanismErrors confirms both
