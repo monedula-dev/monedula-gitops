@@ -2,18 +2,28 @@
 
 > DEV ONLY — single-broker cp-server with embedded MDS and LDAP identity backend. Not for production.
 
-Single-node Confluent Server (`confluentinc/cp-server:7.6.1`, Kafka 3.6) with the embedded
+Single-node Confluent Server (`confluentinc/cp-server:7.6.13`, Kafka 3.6) with the embedded
 Metadata Service (MDS) RBAC engine and an LDAP identity backend. Used by the `22-rolebinding`
 e2e scenario to prove the product's MDS REST client (`internal/mds/confluent`) can add and
 verify a `KafkaRoleBinding` against a real Confluent MDS.
+
+Unlike the other profiles, this one has no compose overlay. Its image still reads
+`MONEDULA_KAFKA_IMAGE` like every other profile, so the matrix stays the single source of
+truth — but in practice the value never varies: this profile runs only under the
+`cp-7.6-mds` cell, which pins the same `confluentinc/cp-server:7.6.13` that the compose file
+carries as its literal default. The pin is enforced by the cell, not by hard-coding here.
+
+It is fixed to the Confluent Platform 7.6 line because CP 8.x removed the scope-wide
+`POST /security/1.0/lookup/rolebindings` MDS endpoint the product uses (see `compose.yaml`'s
+header comment).
 
 ## Services
 
 | Container | Image | Role |
 |---|---|---|
 | `monedula-mds-ldap` | `osixia/openldap:1.5.0` | LDAP identity provider, seeded from `config/users.ldif` |
-| `monedula-mds-kafka` | `confluentinc/cp-server:7.6.1` | Kafka broker + MDS on :8090 |
-| `monedula-mds-bootstrap` | `confluentinc/cp-server:7.6.1` | One-shot: grants `User:mds` SystemAdmin over the kafka scope |
+| `monedula-mds-kafka` | `confluentinc/cp-server:7.6.13` | Kafka broker + MDS on :8090 |
+| `monedula-mds-bootstrap` | `confluentinc/cp-server:7.6.13` | One-shot: grants `User:mds` SystemAdmin over the kafka scope |
 
 ## Ports
 

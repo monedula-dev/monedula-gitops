@@ -9,8 +9,9 @@
 // The suite FAILS when Docker is absent (TestMain exits non-zero), so an
 // explicit `-tags e2e` run can't silently do nothing and still report `ok`;
 // set MONEDULA_E2E_SKIP_WITHOUT_DOCKER=1 to skip cleanly instead.
-// The two top-level tests run sequentially — both profiles bind host :9092
-// so they must not overlap.
+// The five top-level tests run sequentially, gated on the matrix cell — the
+// profiles they exercise bind fixed host ports (:9092 among them) so the
+// tests must not overlap.
 package clie2e
 
 import (
@@ -26,6 +27,7 @@ import (
 	"time"
 
 	"github.com/monedula-dev/monedula-gitops/internal/e2e"
+	"github.com/monedula-dev/monedula-gitops/internal/matrix"
 )
 
 // binPath holds the compiled monedula-gitops binary path. It is set by
@@ -35,6 +37,9 @@ var binPath string
 // repoRoot is the absolute path to the repository root, resolved from this
 // file's location.
 var repoRoot string
+
+// cell is the matrix cell this run exercises, resolved once in TestMain.
+var cell matrix.Cell
 
 // credEnv is the set of environment variable KEY=VALUE pairs required by both
 // profiles (SCRAM + SR credentials exported from compose.yaml). It is global
@@ -103,6 +108,14 @@ func TestMain(m *testing.M) {
 	_, thisFile, _, _ := runtime.Caller(0)
 	repoRoot = filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
 
+	var err error
+	cell, err = matrix.FromEnv()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "resolving matrix cell: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Fprintf(os.Stderr, "\nmonedula-gitops e2e: cell %s (%s)\n\n", cell.ID, cell.Image)
+
 	// Build the binary once into a temp dir.
 	tmpDir, err := os.MkdirTemp("", "monedula-e2e-*")
 	if err != nil {
@@ -111,7 +124,14 @@ func TestMain(m *testing.M) {
 	}
 	defer os.RemoveAll(tmpDir)
 
+	// The .exe suffix is required on Windows, not cosmetic: os/exec resolves
+	// executables through PATHEXT, so exec.Command on an extensionless PE file
+	// fails to start the process. runCLIBinary reports that as exit 127, which
+	// made every scenario fail with an empty output and no other clue.
 	binPath = filepath.Join(tmpDir, "monedula-gitops")
+	if runtime.GOOS == "windows" {
+		binPath += ".exe"
+	}
 	cmd := exec.Command("go", "build", "-o", binPath, "./cmd/monedula-gitops")
 	cmd.Dir = repoRoot
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -120,6 +140,42 @@ func TestMain(m *testing.M) {
 	}
 
 	os.Exit(m.Run())
+}
+
+// composeFiles returns the -f arguments for a profile under the active cell:
+// the base file, plus the apache overlay when the cell's broker is an Apache
+// image. See scenarios/clusters/*/compose.apache.yaml for what the overlay
+// changes and why the delta is as narrow as it is.
+func composeFiles(profileDir string) []string {
+	files := []string{"-f", filepath.Join(profileDir, "compose.yaml")}
+	if cell.Family == matrix.FamilyApache {
+		overlay := filepath.Join(profileDir, "compose.apache.yaml")
+		if _, err := os.Stat(overlay); err == nil {
+			files = append(files, "-f", overlay)
+		}
+	}
+	// Declared overlays (internal/matrix Cell.Overlays), applied in
+	// declaration order after the family-based apache overlay. Same
+	// existence guard: a profile that doesn't need the overlay (e.g. one
+	// with no schema-registry service) simply has no compose.<name>.yaml,
+	// and the overlay is silently skipped for it.
+	for _, name := range cell.Overlays {
+		overlay := filepath.Join(profileDir, "compose."+name+".yaml")
+		if _, err := os.Stat(overlay); err == nil {
+			files = append(files, "-f", overlay)
+		}
+	}
+	return files
+}
+
+// composeEnv returns the environment compose needs to resolve the image
+// placeholders in the profile files.
+func composeEnv() []string {
+	env := append(os.Environ(), "MONEDULA_KAFKA_IMAGE="+cell.Image)
+	if cell.SchemaRegistryImage != "" {
+		env = append(env, "MONEDULA_SR_IMAGE="+cell.SchemaRegistryImage)
+	}
+	return env
 }
 
 // composeUp starts a Docker Compose stack in detached mode, waiting for all
@@ -131,20 +187,18 @@ func TestMain(m *testing.M) {
 // with "port is already allocated".
 func composeUp(t *testing.T, profileDir, project string) {
 	t.Helper()
-	composeFile := filepath.Join(profileDir, "compose.yaml")
 	t.Cleanup(func() { composeDown(profileDir, project) })
-	args := []string{
-		"compose",
-		"-f", composeFile,
-		"-p", project,
-		"up", "-d", "--wait",
-	}
+	args := append([]string{"compose"}, composeFiles(profileDir)...)
+	args = append(args, "-p", project, "up", "-d", "--wait")
 	cmd := exec.Command("docker", args...)
+	cmd.Env = composeEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		// Dump logs to help diagnose the failure.
-		logsCmd := exec.Command("docker", "compose",
-			"-f", composeFile, "-p", project, "logs")
+		logsArgs := append([]string{"compose"}, composeFiles(profileDir)...)
+		logsArgs = append(logsArgs, "-p", project, "logs")
+		logsCmd := exec.Command("docker", logsArgs...)
+		logsCmd.Env = composeEnv()
 		logsOut, _ := logsCmd.CombinedOutput()
 		t.Logf("compose up output:\n%s", out)
 		t.Logf("compose logs:\n%s", logsOut)
@@ -159,19 +213,21 @@ func composeUp(t *testing.T, profileDir, project string) {
 	// Poll `compose ps -a` (which, unlike `compose wait`, also reports
 	// already-exited containers) until kafka-init has exited 0. Profiles
 	// without a kafka-init service (e.g. auth-mtls) report "no such service".
-	waitForInit(t, composeFile, project, "kafka-init")
+	waitForInit(t, profileDir, project, "kafka-init")
 	t.Logf("compose stack %q is up", project)
 }
 
 // waitForInit blocks until the named one-shot compose service has exited 0,
 // the profile turns out not to define it, or a 90s deadline passes. A nonzero
 // exit or a timeout fatals with the service's logs.
-func waitForInit(t *testing.T, composeFile, project, service string) {
+func waitForInit(t *testing.T, profileDir, project, service string) {
 	t.Helper()
 	deadline := time.Now().Add(90 * time.Second)
 	for {
-		psCmd := exec.Command("docker", "compose",
-			"-f", composeFile, "-p", project, "ps", "-a", "--format", "json", service)
+		psArgs := append([]string{"compose"}, composeFiles(profileDir)...)
+		psArgs = append(psArgs, "-p", project, "ps", "-a", "--format", "json", service)
+		psCmd := exec.Command("docker", psArgs...)
+		psCmd.Env = composeEnv()
 		psOut, psErr := psCmd.CombinedOutput()
 		if psErr != nil && strings.Contains(string(psOut), "no such service") {
 			return // profile has no such one-shot — nothing to wait for
@@ -186,8 +242,10 @@ func waitForInit(t *testing.T, composeFile, project, service string) {
 			if line != "" && json.Unmarshal([]byte(strings.SplitN(line, "\n", 2)[0]), &st) == nil {
 				if st.State == "exited" {
 					if st.ExitCode != 0 {
-						logsCmd := exec.Command("docker", "compose",
-							"-f", composeFile, "-p", project, "logs", service)
+						logsArgs := append([]string{"compose"}, composeFiles(profileDir)...)
+						logsArgs = append(logsArgs, "-p", project, "logs", service)
+						logsCmd := exec.Command("docker", logsArgs...)
+						logsCmd.Env = composeEnv()
 						logsOut, _ := logsCmd.CombinedOutput()
 						t.Fatalf("%s exited with code %d\nlogs:\n%s", service, st.ExitCode, logsOut)
 					}
@@ -196,8 +254,10 @@ func waitForInit(t *testing.T, composeFile, project, service string) {
 			}
 		}
 		if time.Now().After(deadline) {
-			logsCmd := exec.Command("docker", "compose",
-				"-f", composeFile, "-p", project, "logs", service)
+			logsArgs := append([]string{"compose"}, composeFiles(profileDir)...)
+			logsArgs = append(logsArgs, "-p", project, "logs", service)
+			logsCmd := exec.Command("docker", logsArgs...)
+			logsCmd.Env = composeEnv()
 			logsOut, _ := logsCmd.CombinedOutput()
 			t.Fatalf("timed out waiting for %s to complete\nlast ps output: %s\nlogs:\n%s",
 				service, psOut, logsOut)
@@ -209,14 +269,10 @@ func waitForInit(t *testing.T, composeFile, project, service string) {
 // composeDown tears down a Docker Compose stack, removing volumes.
 // It is called with best-effort semantics (logged but not fatal on error).
 func composeDown(profileDir, project string) {
-	composeFile := filepath.Join(profileDir, "compose.yaml")
-	args := []string{
-		"compose",
-		"-f", composeFile,
-		"-p", project,
-		"down", "-v",
-	}
+	args := append([]string{"compose"}, composeFiles(profileDir)...)
+	args = append(args, "-p", project, "down", "-v")
 	cmd := exec.Command("docker", args...)
+	cmd.Env = composeEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		// Best-effort: log but don't fatal — the test already ran.
 		fmt.Fprintf(os.Stderr, "compose down %q warning: %v\n%s\n", project, err, out)
@@ -229,15 +285,16 @@ func composeDown(profileDir, project string) {
 // confirming kafka + MDS + rbac-bootstrap all completed successfully.
 func composeUpMDS(t *testing.T, profileDir, project string) {
 	t.Helper()
-	composeFile := filepath.Join(profileDir, "compose.yaml")
 	// Teardown registered before start — see composeUp for why.
 	t.Cleanup(func() { composeDown(profileDir, project) })
 
 	// Start the stack detached; don't use --wait because compose v2 exits 1
 	// whenever any service container exits, even restart:"no" one-shots that
 	// completed successfully (like rbac-bootstrap).
-	upArgs := []string{"compose", "-f", composeFile, "-p", project, "up", "-d"}
+	upArgs := append([]string{"compose"}, composeFiles(profileDir)...)
+	upArgs = append(upArgs, "-p", project, "up", "-d")
 	cmd := exec.Command("docker", upArgs...)
+	cmd.Env = composeEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Logf("compose up output:\n%s", out)
@@ -269,7 +326,10 @@ func composeUpMDS(t *testing.T, profileDir, project string) {
 		}
 		if time.Since(start) > deadline {
 			// Dump logs to help diagnose.
-			logsCmd := exec.Command("docker", "compose", "-f", composeFile, "-p", project, "logs")
+			logsArgs := append([]string{"compose"}, composeFiles(profileDir)...)
+			logsArgs = append(logsArgs, "-p", project, "logs")
+			logsCmd := exec.Command("docker", logsArgs...)
+			logsCmd.Env = composeEnv()
 			logsOut, _ := logsCmd.CombinedOutput()
 			t.Logf("compose logs:\n%s", logsOut)
 			t.Fatalf("auth-mds MDS not healthy after %s", deadline)
@@ -328,6 +388,13 @@ func runCLIScenario(t *testing.T, scenarioDir, profileDir string) {
 	}
 	if !sc.HasMode("cli") {
 		t.Skipf("scenario %q does not declare cli mode", sc.Title)
+	}
+
+	for _, capability := range sc.Requires {
+		if !cell.Supports(capability) {
+			t.Skipf("scenario %s requires %q; cell %s (%s) does not offer it",
+				filepath.Base(scenarioDir), capability, cell.ID, cell.Image)
+		}
 	}
 
 	// Load expect contract.
@@ -508,6 +575,9 @@ func runSteps(t *testing.T, scenarioDir, clusterConfigFile string, steps []e2e.S
 // scenario 01-create-topic (apply) and 02-invalid-manifest (validate), then
 // tears down the stack.
 func TestSharedSASLScenarios(t *testing.T) {
+	if cell.Profile != "" {
+		t.Skipf("cell %s is pinned to profile %s", cell.ID, cell.Profile)
+	}
 	profileDir := filepath.Join(repoRoot, "scenarios", "clusters", "shared-sasl")
 	project := "mon-e2e-shared"
 
@@ -544,6 +614,9 @@ func TestSharedSASLScenarios(t *testing.T) {
 // TestAuthSASLSSLScenarios brings up the auth-sasl-ssl compose stack, runs
 // scenario 04-sasl-ssl (apply), then tears down the stack.
 func TestAuthSASLSSLScenarios(t *testing.T) {
+	if cell.Profile != "" {
+		t.Skipf("cell %s is pinned to profile %s", cell.ID, cell.Profile)
+	}
 	profileDir := filepath.Join(repoRoot, "scenarios", "clusters", "auth-sasl-ssl")
 	project := "mon-e2e-tls"
 
@@ -564,6 +637,9 @@ func TestAuthSASLSSLScenarios(t *testing.T) {
 // TestAuthMTLSScenarios brings up the auth-mtls compose stack and runs the
 // mTLS client-cert scenario.
 func TestAuthMTLSScenarios(t *testing.T) {
+	if cell.Profile != "" {
+		t.Skipf("cell %s is pinned to profile %s", cell.ID, cell.Profile)
+	}
 	profileDir := filepath.Join(repoRoot, "scenarios", "clusters", "auth-mtls")
 	project := "mon-e2e-mtls"
 
@@ -584,6 +660,9 @@ func TestAuthMTLSScenarios(t *testing.T) {
 // TestAuthOAuthScenarios brings up the auth-oauth compose stack (broker + mock
 // OIDC server) and runs the OAUTHBEARER scenario.
 func TestAuthOAuthScenarios(t *testing.T) {
+	if cell.Profile != "" {
+		t.Skipf("cell %s is pinned to profile %s", cell.ID, cell.Profile)
+	}
 	profileDir := filepath.Join(repoRoot, "scenarios", "clusters", "auth-oauth")
 	project := "mon-e2e-oauth"
 
@@ -609,6 +688,9 @@ func TestAuthOAuthScenarios(t *testing.T) {
 // cp-server is a large image with a slow startup — a generous timeout is required
 // (pass -timeout 1200s when invoking go test directly).
 func TestAuthMDSScenarios(t *testing.T) {
+	if cell.Profile != "auth-mds" {
+		t.Skipf("auth-mds runs only under a cell that pins it; active cell is %s", cell.ID)
+	}
 	profileDir := filepath.Join(repoRoot, "scenarios", "clusters", "auth-mds")
 	project := "mon-e2e-mds"
 

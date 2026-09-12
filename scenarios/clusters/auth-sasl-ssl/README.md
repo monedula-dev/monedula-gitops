@@ -67,6 +67,17 @@ monedula-gitops validate -f scenarios/04-sasl-ssl/manifests \
   --cluster-config-file scenarios/clusters/auth-sasl-ssl/cluster.yaml
 ```
 
+## Compose overlay
+
+This directory also has `compose.apache.yaml`. The e2e runner (`test/e2e/cli`)
+layers it on top of `compose.yaml` (`-f compose.yaml -f compose.apache.yaml`)
+when the active matrix cell's broker family is `apache`, resolving the image
+via `MONEDULA_KAFKA_IMAGE` (exported from the cell). `compose.yaml` still works
+standalone with a plain `docker compose up`, since every image reference
+carries a literal default. If you change the `kafka` or `kafka-init` service
+in `compose.yaml`, check whether the same change needs to be mirrored in
+`compose.apache.yaml`.
+
 ## k8s mode
 
 ### Prerequisites

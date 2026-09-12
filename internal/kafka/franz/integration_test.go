@@ -28,7 +28,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
-	tckafka "github.com/testcontainers/testcontainers-go/modules/kafka"
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/monedula-dev/monedula-gitops/internal/access"
@@ -36,49 +35,52 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/diff"
 	"github.com/monedula-dev/monedula-gitops/internal/executor"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
+	"github.com/monedula-dev/monedula-gitops/internal/matrix"
 	"github.com/monedula-dev/monedula-gitops/internal/operations"
 	"github.com/monedula-dev/monedula-gitops/internal/secrets"
 )
 
-// kafkaImage is the Confluent broker image used by the testcontainers kafka
-// module. It speaks plaintext (no TLS/SASL) which matches franz.New(cluster,"")
-// with no Spec.TLS/Spec.Auth.
-const kafkaImage = "confluentinc/confluent-local:7.6.1"
-
-// startKafka starts a single-broker Kafka container and returns a connected
-// franz Client wired to its bootstrap brokers. The container and client are
-// torn down via t.Cleanup. If Docker is unavailable the test is skipped (never
-// failed): first via testcontainers.SkipIfProviderIsNotHealthy, then as a
+// startKafka starts a single-broker Kafka container for the matrix cell
+// resolved from MONEDULA_MATRIX_CELL (or the registry default) and returns a
+// connected franz Client wired to its bootstrap brokers. The container and
+// client are torn down via t.Cleanup. If Docker is unavailable the test is
+// skipped (never failed): first via matrix.SkipUnlessDocker, then as a
 // belt-and-braces fallback if the container start itself fails for a
 // docker-connectivity reason.
 func startKafka(t *testing.T) *Client {
 	t.Helper()
 
 	// Primary Docker-availability gate.
-	testcontainers.SkipIfProviderIsNotHealthy(t)
+	matrix.SkipUnlessDocker(t)
+
+	cell, err := matrix.FromEnv()
+	if err != nil {
+		t.Fatalf("resolving matrix cell: %v", err)
+	}
+	t.Logf("matrix cell %s (%s)", cell.ID, cell.Image)
 
 	ctx := context.Background()
-	container, err := tckafka.Run(ctx, kafkaImage)
+	broker, err := matrix.StartBroker(ctx, cell)
 	if err != nil {
-		if isDockerUnavailable(err) {
+		if matrix.IsDockerUnavailable(err) {
 			t.Skipf("Docker not available, skipping integration test: %v", err)
 		}
-		t.Fatalf("starting kafka container: %v", err)
+		t.Fatalf("starting kafka container for cell %s: %v", cell.ID, err)
 	}
 	t.Cleanup(func() {
-		if err := testcontainers.TerminateContainer(container); err != nil {
+		if err := testcontainers.TerminateContainer(broker); err != nil {
 			t.Logf("terminating kafka container: %v", err)
 		}
 	})
 
-	brokers, err := container.Brokers(ctx)
-	require.NoError(t, err, "getting container bootstrap brokers")
+	brokers := broker.Bootstrap
 	require.NotEmpty(t, brokers, "container returned no brokers")
 
 	cluster := &v1alpha1.KafkaCluster{
 		Spec: v1alpha1.KafkaClusterSpec{
 			BootstrapServers: strings.Join(brokers, ","),
-			// No TLS, no Auth: the testcontainers kafka module is plaintext.
+			// No TLS, no Auth: matrix.StartBroker configures every cell's broker
+			// with a plaintext listener, regardless of family.
 		},
 	}
 
@@ -86,32 +88,6 @@ func startKafka(t *testing.T) *Client {
 	require.NoError(t, err, "constructing franz client")
 	t.Cleanup(client.Close)
 	return client
-}
-
-// isDockerUnavailable heuristically detects a docker-connectivity failure from a
-// container-start error so we can t.Skip instead of t.Fatal. This is a fallback
-// behind SkipIfProviderIsNotHealthy.
-func isDockerUnavailable(err error) bool {
-	if err == nil {
-		return false
-	}
-	s := strings.ToLower(err.Error())
-	for _, needle := range []string{
-		"cannot connect to the docker daemon",
-		"docker daemon",
-		"dial unix",
-		"no such file or directory",
-		"connection refused",
-		"docker.sock",
-		"rootless docker not found",
-		"failed to find a viable docker",
-		"docker host",
-	} {
-		if strings.Contains(s, needle) {
-			return true
-		}
-	}
-	return false
 }
 
 // ctxT returns a per-test context with a generous timeout, tied to t.Cleanup.
@@ -163,10 +139,18 @@ func TestIntegration_UpdateTopicConfig(t *testing.T) {
 
 	require.NoError(t, client.UpdateTopicConfig(ctx, name, map[string]string{"retention.ms": "1209600000"}))
 
-	got, err := client.GetTopic(ctx, name)
-	require.NoError(t, err)
-	require.NotNil(t, got)
-	assert.Equal(t, "1209600000", got.Config["retention.ms"], "UpdateTopicConfig change not reflected by GetTopic")
+	// Poll: same asynchronous metadata image as everywhere else in this file
+	// (see the note in TestIntegration_QuotaRoundTrip). This read-back was
+	// observed failing once on apache/kafka 4.3.1 and passing 4/4 on a rerun,
+	// i.e. flaky for exactly that reason. The assertion is unchanged.
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		got, err := client.GetTopic(ctx, name)
+		assert.NoError(c, err)
+		if !assert.NotNil(c, got) {
+			return
+		}
+		assert.Equal(c, "1209600000", got.Config["retention.ms"], "UpdateTopicConfig change not reflected by GetTopic")
+	}, 30*time.Second, 100*time.Millisecond)
 }
 
 func TestIntegration_CreatePartitions(t *testing.T) {
@@ -180,10 +164,18 @@ func TestIntegration_CreatePartitions(t *testing.T) {
 
 	require.NoError(t, client.CreatePartitions(ctx, name, 6))
 
-	got, err := client.GetTopic(ctx, name)
-	require.NoError(t, err)
-	require.NotNil(t, got)
-	assert.Equal(t, 6, got.Partitions, "CreatePartitions did not raise partition count")
+	// Poll: the partition count lands in the broker's metadata image
+	// asynchronously after the controller commits it (see the note in
+	// TestIntegration_QuotaRoundTrip). The assertion is unchanged, only the
+	// deadline.
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		got, err := client.GetTopic(ctx, name)
+		assert.NoError(c, err)
+		if !assert.NotNil(c, got) {
+			return
+		}
+		assert.Equal(c, 6, got.Partitions, "CreatePartitions did not raise partition count")
+	}, 30*time.Second, 100*time.Millisecond)
 }
 
 // TestIntegration_ErrorSurfacing is CRITICAL: it pins that broker-rejected
@@ -260,6 +252,10 @@ func TestIntegration_ListTopicsExcludesInternal(t *testing.T) {
 // Type.String()/Pattern.String()/Operation.String()/Permission.String()
 // re-parse symmetrically) and disappears after delete.
 func TestIntegration_ACLRoundTrip(t *testing.T) {
+	cell, err := matrix.FromEnv()
+	require.NoError(t, err)
+	matrix.SkipWithoutCapability(t, cell, matrix.CapACLs)
+
 	client := startKafka(t)
 	ctx := ctxT(t)
 
@@ -315,6 +311,10 @@ func TestIntegration_ACLRoundTrip(t *testing.T) {
 // on create when empty), and that a delete using the explicit "*" host removes
 // it (the filter path requires an explicit host).
 func TestIntegration_ACLHostDefaulting(t *testing.T) {
+	cell, err := matrix.FromEnv()
+	require.NoError(t, err)
+	matrix.SkipWithoutCapability(t, cell, matrix.CapACLs)
+
 	client := startKafka(t)
 	ctx := ctxT(t)
 
@@ -376,18 +376,42 @@ func TestIntegration_Converge(t *testing.T) {
 	require.True(t, res.OK(), "executor.Apply did not fully succeed: %+v", res.Results)
 
 	// Re-read live state and recompute: must be converged (zero ops).
-	live2 := liveState(t, ctx, client)
-	ops2 := diff.Compute(desired, live2)
-	assert.Empty(t, ops2, "cluster did not converge; residual ops: %s", renderOps(ops2))
+	//
+	// Poll: the topic the executor just created reaches the broker's metadata
+	// image asynchronously (see the note in TestIntegration_QuotaRoundTrip), so
+	// an immediate re-read can still report an empty cluster and recompute the
+	// very CreateTopic op that just succeeded. The assertion — zero residual
+	// ops — is unchanged.
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		live2, err := readLiveState(ctx, client)
+		if !assert.NoError(c, err) {
+			return
+		}
+		ops2 := diff.Compute(desired, live2)
+		assert.Empty(c, ops2, "cluster did not converge; residual ops: %s", renderOps(ops2))
+	}, 30*time.Second, 100*time.Millisecond)
 }
 
-// liveState reads topics and ACLs from the live cluster into a diff.Live.
+// liveState reads topics and ACLs from the live cluster into a diff.Live,
+// failing the test on error.
 func liveState(t *testing.T, ctx context.Context, client *Client) diff.Live {
 	t.Helper()
+	live, err := readLiveState(ctx, client)
+	require.NoError(t, err)
+	return live
+}
+
+// readLiveState is the error-returning form of liveState, for use inside a
+// polling assertion where a failed read must be retried rather than fatal.
+func readLiveState(ctx context.Context, client *Client) (diff.Live, error) {
 	topics, err := client.ListTopics(ctx)
-	require.NoError(t, err)
+	if err != nil {
+		return diff.Live{}, err
+	}
 	aclStates, err := client.ListACLs(ctx)
-	require.NoError(t, err)
+	if err != nil {
+		return diff.Live{}, err
+	}
 	acls := make([]access.ACL, 0, len(aclStates))
 	for _, a := range aclStates {
 		acls = append(acls, access.ACL{
@@ -400,7 +424,7 @@ func liveState(t *testing.T, ctx context.Context, client *Client) diff.Live {
 			Permission:   a.Permission,
 		})
 	}
-	return diff.Live{Topics: topics, ACLs: acls}
+	return diff.Live{Topics: topics, ACLs: acls}, nil
 }
 
 // --- helpers ---
@@ -471,9 +495,14 @@ func canonPermission(s string) kmsg.ACLPermissionType {
 // --- Quotas ---
 
 // TestIntegration_QuotaRoundTrip exercises SetQuota -> ListQuotas -> DeleteQuota
-// -> ListQuotas against the real broker (Confluent Local 7.6.1 supports client
-// quotas via the standard AlterClientQuotas / DescribeClientQuotas APIs).
+// -> ListQuotas against the real broker for the active matrix cell (skipped via
+// SkipWithoutCapability for a cell that lacks CapQuotas), using the standard
+// AlterClientQuotas / DescribeClientQuotas APIs.
 func TestIntegration_QuotaRoundTrip(t *testing.T) {
+	cell, err := matrix.FromEnv()
+	require.NoError(t, err)
+	matrix.SkipWithoutCapability(t, cell, matrix.CapQuotas)
+
 	client := startKafka(t)
 	ctx := ctxT(t)
 
@@ -487,20 +516,38 @@ func TestIntegration_QuotaRoundTrip(t *testing.T) {
 	}), "SetQuota failed")
 
 	// ListQuotas must include the entry we just set.
-	list, err := client.ListQuotas(ctx)
-	require.NoError(t, err, "ListQuotas after SetQuota failed")
-	assert.True(t, quotaHasLimit(list, "user", "itest-quota", "producer_byte_rate", 1000),
-		"ListQuotas did not return the expected producer_byte_rate=1000 for user itest-quota; got: %+v", list)
+	//
+	// Poll rather than read once. AlterClientQuotas is answered as soon as the
+	// KRaft controller commits the record, but DescribeClientQuotas is served
+	// from the broker's own metadata image, which applies that record
+	// asynchronously. Measured on cp-8.3: the FIRST quota write against a
+	// freshly started broker is invisible to an immediate read-back and lands
+	// ~40-70ms later; every later write in the same container is visible at
+	// once. (On a cold, still-warming broker the same lag was measured as high
+	// as ~2s for topic metadata, hence the generous deadline.) Each test here
+	// gets a brand-new container and does exactly one write, so it is always
+	// the write that loses that race. The assertion itself is unchanged — only
+	// the deadline is — because eventual visibility is the real contract of a
+	// KRaft metadata write, not a weaker one.
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		list, err := client.ListQuotas(ctx)
+		assert.NoError(c, err, "ListQuotas after SetQuota failed")
+		assert.True(c, quotaHasLimit(list, "user", "itest-quota", "producer_byte_rate", 1000),
+			"ListQuotas did not return the expected producer_byte_rate=1000 for user itest-quota; got: %+v", list)
+	}, 30*time.Second, 100*time.Millisecond)
 
 	// DeleteQuota must remove the key.
 	require.NoError(t, client.DeleteQuota(ctx, entity, []string{"producer_byte_rate"}),
 		"DeleteQuota failed")
 
-	// ListQuotas must no longer carry that entry (entity absent or limit key removed).
-	list2, err := client.ListQuotas(ctx)
-	require.NoError(t, err, "ListQuotas after DeleteQuota failed")
-	assert.False(t, quotaHasLimit(list2, "user", "itest-quota", "producer_byte_rate", 1000),
-		"ListQuotas still returned producer_byte_rate=1000 for user itest-quota after DeleteQuota; got: %+v", list2)
+	// ListQuotas must no longer carry that entry (entity absent or limit key
+	// removed). Same asynchronous metadata image, same bounded wait.
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		list2, err := client.ListQuotas(ctx)
+		assert.NoError(c, err, "ListQuotas after DeleteQuota failed")
+		assert.False(c, quotaHasLimit(list2, "user", "itest-quota", "producer_byte_rate", 1000),
+			"ListQuotas still returned producer_byte_rate=1000 for user itest-quota after DeleteQuota; got: %+v", list2)
+	}, 30*time.Second, 100*time.Millisecond)
 }
 
 // strPtr is a helper that returns a pointer to s, for building QuotaEntityComponent.Name.
@@ -533,6 +580,10 @@ func quotaHasLimit(list []kafka.QuotaState, entityType, entityName, limitKey str
 // from ZooKeeper-less KRaft metadata, never actually used to authenticate a
 // connection.
 func TestIntegration_ScramCredentialRoundTrip(t *testing.T) {
+	cell, err := matrix.FromEnv()
+	require.NoError(t, err)
+	matrix.SkipWithoutCapability(t, cell, matrix.CapSCRAM)
+
 	client := startKafka(t)
 	ctx := ctxT(t)
 
@@ -587,11 +638,15 @@ func TestIntegration_ScramCredentialRoundTrip(t *testing.T) {
 // UpsertScramCredential and DeleteScramCredential reject a non-canonical
 // mechanism string loudly rather than silently coercing or ignoring it.
 func TestIntegration_ScramCredentialUnknownMechanismErrors(t *testing.T) {
+	cell, err := matrix.FromEnv()
+	require.NoError(t, err)
+	matrix.SkipWithoutCapability(t, cell, matrix.CapSCRAM)
+
 	client := startKafka(t)
 	ctx := ctxT(t)
 	user := "itest-scram-bad-" + sanitize(t.Name())
 
-	err := client.UpsertScramCredential(ctx, kafka.ScramUpsert{
+	err = client.UpsertScramCredential(ctx, kafka.ScramUpsert{
 		User: user, Mechanism: "SCRAM-SHA-1", Password: "whatever",
 	})
 	assert.Error(t, err, "unsupported mechanism must error on upsert")

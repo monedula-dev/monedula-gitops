@@ -86,7 +86,7 @@ spec:
       enableServiceLinks: false
       containers:
         - name: kafka
-          image: confluentinc/cp-kafka:8.0.0
+          image: confluentinc/cp-kafka:8.3.1
           ports:
             - name: client
               containerPort: 9092
@@ -206,7 +206,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: bootstrap
-          image: confluentinc/cp-kafka:8.0.0
+          image: confluentinc/cp-kafka:8.3.1
           command:
             - bash
             - -c

@@ -1,7 +1,7 @@
 # Code/manifest generation for the Kubernetes operator.
 CONTROLLER_GEN := go run sigs.k8s.io/controller-tools/cmd/controller-gen
 
-.PHONY: generate manifests test helm-sync-crds helm-lint helm-package e2e-k8s e2e-cloud
+.PHONY: generate manifests test helm-sync-crds helm-lint helm-package e2e-k8s e2e-cloud matrix-docs integration e2e-cli
 
 # DeepCopy methods for the API types.
 generate:
@@ -69,3 +69,20 @@ e2e-k8s: ## Run the k8s scenario suite over kind (skips if kind/kubectl/bats abs
 	  test/e2e/k8s/setup.sh && \
 	  bats test/e2e/k8s/run.bats; \
 	  rc=$$?; test/e2e/k8s/teardown.sh; exit $$rc
+
+# Regenerate the version-matrix table in README.md from internal/matrix/versions.yaml.
+# CI fails when this leaves the tree dirty, so the docs cannot drift from what runs.
+matrix-docs:
+	go run ./hack/matrix-cells -readme=README.md
+
+# Adapter integration tests against one matrix cell (default: the cell marked
+# `default: true`). Override with MONEDULA_MATRIX_CELL=ak-4.3 make integration.
+# -count=1 is required: the cell comes from an env var, which go test's result
+# cache does not track.
+integration:
+	go test -tags integration ./... -timeout 25m -count=1
+
+# The CLI scenario suite against one matrix cell. Needs a running Docker daemon;
+# fails (rather than silently passing) without one.
+e2e-cli:
+	go test -tags e2e ./test/e2e/cli/ -v -timeout 60m -count=1

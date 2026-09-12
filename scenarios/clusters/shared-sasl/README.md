@@ -70,6 +70,21 @@ kubectl delete -f k8s/kafka.yaml
 kubectl delete -f k8s/namespace.yaml
 ```
 
+## Compose overlays
+
+This directory also has `compose.apache.yaml` and `compose.jetty9.yaml`. The e2e
+runner (`test/e2e/cli`) layers these on top of `compose.yaml` (`-f compose.yaml
+-f compose.apache.yaml -f compose.jetty9.yaml`) depending on the active matrix
+cell: `compose.apache.yaml` for an `apache`-family broker image, `compose.jetty9.yaml`
+for a cell that declares the `jetty9` overlay (cp-schema-registry 7.x's older
+Jetty line needs a different JAAS class path — see
+`config/schema-registry-jaas-jetty9.conf`). Both are resolved via
+`MONEDULA_KAFKA_IMAGE` / `MONEDULA_SR_IMAGE`, which the runner exports from the
+cell. `compose.yaml` still works standalone with a plain `docker compose up`,
+since every image reference carries a literal default. If you change the
+broker or Schema Registry service in `compose.yaml`, check whether the same
+change needs to be mirrored in these overlays.
+
 ## cluster.yaml reference
 
 `cluster.yaml` (this directory) defines the `shared` KafkaCluster CR that

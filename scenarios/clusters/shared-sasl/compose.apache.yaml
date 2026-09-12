@@ -1,0 +1,33 @@
+# Overlay applied on top of compose.yaml for matrix cells whose family is
+# `apache`, merged as:
+#
+#   docker compose -f compose.yaml -f compose.apache.yaml ...
+#
+# The delta is narrow by design. The apache/kafka image mirrors the Confluent
+# image's configuration layout (/etc/kafka/docker/* instead of
+# /etc/confluent/docker/*) and applies KAFKA_* environment variables to broker
+# properties identically, so the whole security/listener configuration in
+# compose.yaml carries over untouched. What differs is the tooling:
+# /opt/kafka/bin is NOT on PATH, and the scripts carry a .sh suffix.
+services:
+  kafka:
+    image: ${MONEDULA_KAFKA_IMAGE:-apache/kafka:4.3.1}
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "kafka:9094"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  kafka-init:
+    image: ${MONEDULA_KAFKA_IMAGE:-apache/kafka:4.3.1}
+    command:
+      - |
+        set -euo pipefail
+        /opt/kafka/bin/kafka-configs.sh --bootstrap-server kafka:9094 --alter \
+          --add-config 'SCRAM-SHA-512=[password=admin-secret]' \
+          --entity-type users --entity-name admin
+        /opt/kafka/bin/kafka-configs.sh --bootstrap-server kafka:9094 --alter \
+          --add-config 'SCRAM-SHA-512=[password=monedula-secret]' \
+          --entity-type users --entity-name monedula
+        echo "SCRAM users created"

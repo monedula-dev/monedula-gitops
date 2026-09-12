@@ -1,0 +1,86 @@
+# Single source of truth for the Kafka/Confluent versions this project validates
+# against. Consumed by:
+#   - internal/matrix (the Go loader, embedded via go:embed)
+#   - hack/matrix-cells (CI matrix JSON + the README support table)
+#   - the integration tier (internal/kafka/franz, internal/schemaregistry/confluent)
+#   - the e2e tier (test/e2e/cli)
+#
+# Cell-to-profile rule: a cell WITHOUT `profile` runs every compose profile
+# EXCEPT auth-mds. The auth-mds profile runs ONLY under a cell that names it.
+# This keeps MDS on its pinned cp-server line without dropping it from the suite.
+#
+# Version rationale: cover the breaks that change behaviour, not every minor.
+# Apache 3.9 -> 4.0 is the KRaft-only / ZooKeeper-removal boundary. CP 7.x -> 8.x
+# removed the scope-wide POST /security/1.0/lookup/rolebindings MDS endpoint,
+# which is why auth-mds is pinned to the 7.6 line.
+# Support floor: Apache Kafka 3.9, Confluent Platform 7.6.
+cells:
+  - id: ak-3.9
+    family: apache
+    image: apache/kafka:3.9.2
+    tiers: [integration]
+    capabilities: [topics, acls, quotas, scram]
+
+  - id: ak-4.0
+    family: apache
+    image: apache/kafka:4.0.2
+    tiers: [integration]
+    capabilities: [topics, acls, quotas, scram]
+
+  # Deliberately pairs an Apache broker with a Confluent Schema Registry: a
+  # common real-world combination that nothing else in the suite covers.
+  - id: ak-4.3
+    family: apache
+    image: apache/kafka:4.3.1
+    schemaRegistryImage: confluentinc/cp-schema-registry:8.3.1
+    tiers: [integration, e2e]
+    capabilities: [topics, acls, quotas, scram, schemaregistry]
+
+  # overlays: [jetty9] -- cp-schema-registry 7.x bundles Jetty 9.4-11, whose
+  # PropertyFileLoginModule lives at org.eclipse.jetty.jaas.spi (not the
+  # org.eclipse.jetty.security.jaas.spi path the base JAAS file uses, which
+  # targets the Jetty 12 line shipped by cp 8.x). This is a real image
+  # difference, not a style choice: with the Jetty 12 class path loaded
+  # against a Jetty 9 image, Schema Registry Basic auth fails every request
+  # with 401, even for correct credentials. See
+  # scenarios/clusters/shared-sasl/config/schema-registry-jaas-jetty9.conf.
+  - id: cp-7.6
+    family: confluent
+    image: confluentinc/cp-kafka:7.6.13
+    schemaRegistryImage: confluentinc/cp-schema-registry:7.6.13
+    tiers: [integration]
+    capabilities: [topics, acls, quotas, scram, schemaregistry]
+    overlays: [jetty9]
+
+  # overlays: [jetty9] -- same Jetty 9 vs 12 JAAS package split as cp-7.6 above.
+  - id: cp-7.9
+    family: confluent
+    image: confluentinc/cp-kafka:7.9.9
+    schemaRegistryImage: confluentinc/cp-schema-registry:7.9.9
+    tiers: [integration, e2e]
+    capabilities: [topics, acls, quotas, scram, schemaregistry]
+    overlays: [jetty9]
+
+  - id: cp-8.0
+    family: confluent
+    image: confluentinc/cp-kafka:8.0.7
+    schemaRegistryImage: confluentinc/cp-schema-registry:8.0.7
+    tiers: [integration]
+    capabilities: [topics, acls, quotas, scram, schemaregistry]
+
+  - id: cp-8.3
+    family: confluent
+    image: confluentinc/cp-kafka:8.3.1
+    schemaRegistryImage: confluentinc/cp-schema-registry:8.3.1
+    default: true
+    tiers: [integration, e2e]
+    capabilities: [topics, acls, quotas, scram, schemaregistry]
+
+  # cp-server carries MDS. Pinned to 7.6: CP 8.x removed the scope-wide
+  # lookup/rolebindings endpoint the product's MDS client uses.
+  - id: cp-7.6-mds
+    family: confluent
+    image: confluentinc/cp-server:7.6.13
+    profile: auth-mds
+    tiers: [e2e]
+    capabilities: [topics, acls, quotas, scram, mds]

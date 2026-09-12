@@ -1,0 +1,37 @@
+# Overlay applied on top of compose.yaml for matrix cells whose family is
+# `apache`, merged as:
+#
+#   docker compose -f compose.yaml -f compose.apache.yaml ...
+#
+# The delta is narrow by design. The apache/kafka image mirrors the Confluent
+# image's configuration layout (/etc/kafka/docker/* instead of
+# /etc/confluent/docker/*) and applies KAFKA_* environment variables to broker
+# properties identically, so the whole security/listener/TLS configuration in
+# compose.yaml carries over untouched. What differs is the tooling:
+# /opt/kafka/bin is NOT on PATH, the scripts carry a .sh suffix, and the
+# cert-combining entrypoint must chain into the apache image's own
+# docker-entrypoint run script (/etc/kafka/docker/run) instead of the
+# Confluent one (/etc/confluent/docker/run) it wraps in compose.yaml.
+#
+# This profile defines only the kafka service (no kafka-init: mTLS derives
+# the client principal from the certificate DN, so there is no SCRAM
+# bootstrap step to translate).
+services:
+  kafka:
+    image: ${MONEDULA_KAFKA_IMAGE:-apache/kafka:4.3.1}
+    entrypoint:
+      - bash
+      - -c
+      - |
+        set -euo pipefail
+        # Combine server cert + key into a PEM keystore for Kafka's ssl.keystore.location.
+        cat /etc/kafka/secrets/certs/server.crt /etc/kafka/secrets/certs/server.key \
+          > /etc/kafka/secrets/server-keystore.pem
+        chmod 600 /etc/kafka/secrets/server-keystore.pem
+        exec /etc/kafka/docker/run
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "kafka:9094"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s

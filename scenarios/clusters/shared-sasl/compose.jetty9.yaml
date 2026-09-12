@@ -1,0 +1,19 @@
+# Overlay applied on top of compose.yaml for matrix cells that declare the
+# "jetty9" overlay (internal/matrix/versions.yaml's `overlays` list — cp-7.6,
+# cp-7.9), merged as:
+#
+#   docker compose -f compose.yaml -f compose.jetty9.yaml ...
+#
+# Those cells' cp-schema-registry image bundles Jetty 9.4-11 rather than the
+# Jetty 12 line the base compose.yaml's JAAS file targets, and the
+# PropertyFileLoginModule class path differs between the two (see
+# config/schema-registry-jaas-jetty9.conf). The only change here is which
+# JAAS file lands at the path SCHEMA_REGISTRY_OPTS already points to
+# (/etc/schema-registry/secrets/schema-registry-jaas.conf) -- everything else
+# about the schema-registry service (image, healthcheck, other auth/env
+# settings) is untouched.
+services:
+  schema-registry:
+    volumes:
+      - ./config/schema-registry-jaas-jetty9.conf:/etc/schema-registry/secrets/schema-registry-jaas.conf:ro
+      - ./config/sr-password.properties:/etc/schema-registry/secrets/sr-password.properties:ro

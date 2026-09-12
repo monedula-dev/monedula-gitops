@@ -105,9 +105,29 @@ compatibility, which any Confluent-compatible registry (including self-hosted on
 MDS/RBAC is a Confluent Platform-only component; Confluent Cloud authorizes RBAC through a
 separate, cloud-specific API this tool does not implement — see
 [Connecting](docs/connecting.md#support-matrix) for details.
-**CI validates continuously against Apache Kafka (`cp-kafka` images) and Confluent Platform
-components; Confluent Cloud was validated with the opt-in maintainer harness (`make e2e-cloud`),
-not in CI.**
+
+### Validated versions
+
+CI runs the container-backed suites against every version below on each pull request
+(adapter integration tests) and nightly, on every push to `main`, and on demand (the
+full scenario suite). Confluent Cloud is validated with the opt-in maintainer harness
+(`make e2e-cloud`), not in CI.
+
+<!-- BEGIN GENERATED: version-matrix -->
+| Cell | Broker image | Schema Registry image | Tiers | Capabilities |
+|---|---|---|---|---|
+| `ak-3.9` | `apache/kafka:3.9.2` | `—` | integration | topics, acls, quotas, scram |
+| `ak-4.0` | `apache/kafka:4.0.2` | `—` | integration | topics, acls, quotas, scram |
+| `ak-4.3` | `apache/kafka:4.3.1` | `confluentinc/cp-schema-registry:8.3.1` | integration, e2e | topics, acls, quotas, scram, schemaregistry |
+| `cp-7.6` | `confluentinc/cp-kafka:7.6.13` | `confluentinc/cp-schema-registry:7.6.13` | integration | topics, acls, quotas, scram, schemaregistry |
+| `cp-7.9` | `confluentinc/cp-kafka:7.9.9` | `confluentinc/cp-schema-registry:7.9.9` | integration, e2e | topics, acls, quotas, scram, schemaregistry |
+| `cp-8.0` | `confluentinc/cp-kafka:8.0.7` | `confluentinc/cp-schema-registry:8.0.7` | integration | topics, acls, quotas, scram, schemaregistry |
+| `cp-8.3` | `confluentinc/cp-kafka:8.3.1` | `confluentinc/cp-schema-registry:8.3.1` | integration, e2e | topics, acls, quotas, scram, schemaregistry |
+| `cp-7.6-mds` | `confluentinc/cp-server:7.6.13` | `—` | e2e | topics, acls, quotas, scram, mds |
+<!-- END GENERATED: version-matrix -->
+
+This table is generated from `internal/matrix/versions.yaml` by `make matrix-docs`; CI fails
+if it is stale.
 
 ## Alternatives
 

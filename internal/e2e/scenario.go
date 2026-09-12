@@ -15,6 +15,10 @@ type Scenario struct {
 	Modes   []string `json:"modes"`
 	Cluster string   `json:"cluster"`
 	Summary string   `json:"summary,omitempty"`
+	// Requires lists the version-matrix capabilities (see internal/matrix) the
+	// broker cell must offer for this scenario to run. Empty means the
+	// scenario has no cell-specific requirement.
+	Requires []string `json:"requires,omitempty"`
 	// Dir is the path to the scenario directory (set by LoadScenario, not parsed).
 	Dir string `json:"-"`
 }
