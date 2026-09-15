@@ -86,6 +86,16 @@ monedula-gitops validate -f scenarios/20-mtls/manifests \
    against its truststore (`ca.crt`).
 4. If verification passes, the connection is established. No SASL exchange occurs.
 
+## Compose overlay
+
+This directory also has `compose.apache.yaml`. The e2e runner (`test/e2e/cli`)
+layers it on top of `compose.yaml` (`-f compose.yaml -f compose.apache.yaml`)
+when the active matrix cell's broker family is `apache`, resolving the image
+via `MONEDULA_KAFKA_IMAGE` (exported from the cell). `compose.yaml` still works
+standalone with a plain `docker compose up`, since the image reference carries
+a literal default. If you change the `kafka` service in `compose.yaml`, check
+whether the same change needs to be mirrored in `compose.apache.yaml`.
+
 ## Opting into this profile
 
 A scenario selects this profile in its `scenario.yaml`:

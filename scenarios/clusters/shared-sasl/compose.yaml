@@ -21,7 +21,7 @@
 
 services:
   kafka:
-    image: confluentinc/cp-kafka:8.0.0
+    image: ${MONEDULA_KAFKA_IMAGE:-confluentinc/cp-kafka:8.3.1}
     hostname: kafka
     container_name: monedula-quickstart-kafka
     ports:
@@ -79,7 +79,7 @@ services:
 
   # One-shot job: create the SCRAM users over the PLAINTEXT internal listener.
   kafka-init:
-    image: confluentinc/cp-kafka:8.0.0
+    image: ${MONEDULA_KAFKA_IMAGE:-confluentinc/cp-kafka:8.3.1}
     container_name: monedula-quickstart-kafka-init
     depends_on:
       kafka:
@@ -98,7 +98,7 @@ services:
         echo "SCRAM users created"
 
   schema-registry:
-    image: confluentinc/cp-schema-registry:8.0.0
+    image: ${MONEDULA_SR_IMAGE:-confluentinc/cp-schema-registry:8.3.1}
     hostname: schema-registry
     container_name: monedula-quickstart-schema-registry
     depends_on:
@@ -128,12 +128,34 @@ services:
       - ./config/schema-registry-jaas.conf:/etc/schema-registry/secrets/schema-registry-jaas.conf:ro
       - ./config/sr-password.properties:/etc/schema-registry/secrets/sr-password.properties:ro
     healthcheck:
-      # Probe the REST API with credentials; 401 means SR is up but credentials
-      # are wrong (shouldn't happen), 200 means fully ready.  We accept both 200
-      # and 401 as "service is listening" so the check passes even if the JAAS
-      # config has an unexpected issue — the scenario test will surface the real
-      # auth error. The critical thing is that SR is accepting TCP connections.
-      test: ["CMD-SHELL", "curl -sf -u sr:sr-secret http://localhost:8081/subjects || curl -sf http://localhost:8081/subjects -o /dev/null -w '%{http_code}' | grep -q '401'"]
+      # curl/wget/nc were removed from cp-schema-registry between 8.0 and 8.3;
+      # python3 is the one HTTP-capable tool present across the whole 7.6-8.3
+      # range the matrix covers. A 200 means ready, a 401 means SR is listening
+      # but the credentials are wrong — both prove the port is serving, and the
+      # scenario itself surfaces a real auth error with a better message.
+      #
+      # Accepting 401 here is deliberate, not an oversight, and it has a real
+      # cost: a genuinely broken JAAS realm also returns 401, so it passes this
+      # probe as "healthy" and only surfaces later, as failing scenarios rather
+      # than a container that never goes healthy. That happened on this branch:
+      # Confluent Platform 7.x bundles a different Jetty version whose JAAS
+      # login-module class path differs from 8.x (see the `jetty9` overlay and
+      # cp-7.6/cp-7.9 in internal/matrix/versions.yaml), and Basic auth returned
+      # 401 while the container still reported healthy.
+      test:
+        - CMD
+        - python3
+        - -c
+        - |
+          import base64, sys, urllib.error, urllib.request
+          req = urllib.request.Request('http://localhost:8081/subjects')
+          req.add_header('Authorization', 'Basic ' + base64.b64encode(b'sr:sr-secret').decode())
+          try:
+              sys.exit(0 if urllib.request.urlopen(req, timeout=5).status == 200 else 1)
+          except urllib.error.HTTPError as e:
+              sys.exit(0 if e.code == 401 else 1)
+          except Exception:
+              sys.exit(1)
       interval: 5s
       timeout: 10s
       retries: 18

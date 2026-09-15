@@ -23,6 +23,13 @@ jobs:
         run: |
           go mod tidy
           git diff --exit-code go.mod go.sum
+      # The README version table is generated from internal/matrix/versions.yaml.
+      # A stale table means the documented support claim no longer matches what
+      # CI actually runs — which is exactly how the previous claim went wrong.
+      - name: README version matrix is current
+        run: |
+          make matrix-docs
+          git diff --exit-code README.md
       # go>=1.26 gofmt rewrites paired apostrophes in doc comments into curly
       # quotes, corrupting CEL rules; see the guard comment in types.go.
       - name: forbid CEL empty-string literals in types.go
@@ -65,3 +72,71 @@ jobs:
         with:
           version: '~> v2'
           args: check
+  # Renders internal/matrix/versions.yaml into job matrices. Using the project's
+  # own loader (hack/matrix-cells) rather than yq keeps CI and the unit tests on
+  # the same parser, so the two cannot disagree about what the file means.
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      integration: ${{ steps.cells.outputs.integration }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - id: cells
+        run: |
+          cells=$(go run ./hack/matrix-cells -tier=integration)
+          echo "integration=$cells" >> "$GITHUB_OUTPUT"
+  # Container-backed adapter tests, once per broker version the project claims to
+  # support. Until this existed, `go test -race ./...` skipped every one of them:
+  # they sit behind the `integration` build tag, so no container had ever started
+  # in CI. See internal/matrix/versions.yaml for why these versions.
+  integration-matrix:
+    needs: matrix
+    runs-on: ubuntu-latest
+    # Generous headroom over the test step's own -timeout 25m: checkout, Go
+    # setup, build, and multi-hundred-megabyte image pulls all happen before
+    # that timeout starts counting. If the outer job timeout wins instead of
+    # the inner one, `go test` never gets to print its goroutine dump, and a
+    # hang becomes undiagnosable.
+    timeout-minutes: 40
+    strategy:
+      # One broken broker version must not hide the results of the others.
+      fail-fast: false
+      matrix:
+        cell: ${{ fromJSON(needs.matrix.outputs.integration) }}
+    name: integration (${{ matrix.cell }})
+    # `secrets` is not a valid context in a step-level `if` (GitHub's
+    # jobs.<job_id>.steps.<step_id>.if only allows github, needs, strategy,
+    # matrix, job, runner, env, vars, steps, inputs) — using it there fails
+    # evaluation for the whole workflow file. `jobs.<job_id>.env` DOES allow
+    # secrets, and step `if` DOES allow `env`, so hoist it here. Do not
+    # "simplify" this back to `if: ${{ secrets.DOCKERHUB_USERNAME != '' }}`.
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      # Authenticated pulls when credentials exist: 7 cells x several images per
+      # PR runs into Docker Hub's anonymous rate limit. The job still works
+      # without the secrets — it just risks being throttled.
+      - name: Log in to Docker Hub
+        if: env.DOCKERHUB_USERNAME != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      # -count=1 is required: the cell comes from an environment variable, which
+      # go test's result cache does not track — a cached "ok" from another cell
+      # would otherwise be reported as a pass for this one.
+      # -v is not noise here: without it a failing cell reports only "exit code
+      # 1", with no test name and no container diagnostics, and Actions logs are
+      # not readable without a signed-in session — so a red cell is opaque to
+      # anyone triaging from the API. The e2e workflow already passes it.
+      - name: Integration tests
+        run: go test -tags integration ./... -v -timeout 25m -count=1
+        env:
+          MONEDULA_MATRIX_CELL: ${{ matrix.cell }}

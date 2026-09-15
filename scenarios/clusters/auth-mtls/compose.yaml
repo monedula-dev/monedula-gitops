@@ -20,7 +20,7 @@
 
 services:
   kafka:
-    image: confluentinc/cp-kafka:8.0.0
+    image: ${MONEDULA_KAFKA_IMAGE:-confluentinc/cp-kafka:8.3.1}
     hostname: kafka
     container_name: monedula-mtls-kafka
     ports:

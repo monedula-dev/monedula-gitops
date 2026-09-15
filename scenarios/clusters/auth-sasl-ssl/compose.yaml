@@ -29,7 +29,7 @@
 
 services:
   kafka:
-    image: confluentinc/cp-kafka:8.0.0
+    image: ${MONEDULA_KAFKA_IMAGE:-confluentinc/cp-kafka:8.3.1}
     hostname: kafka
     container_name: monedula-sasl-ssl-kafka
     ports:
@@ -106,7 +106,7 @@ services:
 
   # One-shot job: create the SCRAM users over the PLAINTEXT internal listener.
   kafka-init:
-    image: confluentinc/cp-kafka:8.0.0
+    image: ${MONEDULA_KAFKA_IMAGE:-confluentinc/cp-kafka:8.3.1}
     container_name: monedula-sasl-ssl-kafka-init
     depends_on:
       kafka:

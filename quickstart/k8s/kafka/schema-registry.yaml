@@ -77,7 +77,7 @@ spec:
         # Wait until Kafka accepts SASL/SCRAM connections on :9092, i.e. until
         # the kafka-scram-bootstrap Job has created the `admin` SCRAM user.
         - name: wait-for-kafka-sasl
-          image: confluentinc/cp-kafka:8.0.0
+          image: confluentinc/cp-kafka:8.3.1
           command:
             - bash
             - -c
@@ -104,7 +104,7 @@ spec:
               memory: 256Mi
       containers:
         - name: schema-registry
-          image: confluentinc/cp-schema-registry:8.0.0
+          image: confluentinc/cp-schema-registry:8.3.1
           ports:
             - name: http
               containerPort: 8081

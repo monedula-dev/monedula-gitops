@@ -1,7 +1,7 @@
-# Monedula e2e scenario cluster: single-node Confluent Server (cp-server 7.6.1) with
+# Monedula e2e scenario cluster: single-node Confluent Server (cp-server 7.6.13) with
 # RBAC + Metadata Service (MDS) + LDAP identity backend.
 #
-# CP version: 7.6.1 (Kafka 3.6). cp-server 8.x removed the scope-wide
+# CP version: 7.6.13 (Kafka 3.6). cp-server 8.x removed the scope-wide
 # POST /security/1.0/lookup/rolebindings endpoint; 7.6 still has it.
 #
 # Security model (DEV ONLY — fake creds/keys):
@@ -40,7 +40,7 @@ services:
       start_period: 10s
 
   kafka:
-    image: confluentinc/cp-server:7.6.1
+    image: ${MONEDULA_KAFKA_IMAGE:-confluentinc/cp-server:7.6.13}
     hostname: kafka
     container_name: monedula-mds-kafka
     depends_on:
@@ -133,7 +133,7 @@ services:
       start_period: 90s
 
   rbac-bootstrap:
-    image: confluentinc/cp-server:7.6.1
+    image: ${MONEDULA_KAFKA_IMAGE:-confluentinc/cp-server:7.6.13}
     container_name: monedula-mds-bootstrap
     depends_on:
       kafka:

@@ -21,7 +21,7 @@
 
 services:
   kafka:
-    image: confluentinc/cp-kafka:8.0.0
+    image: confluentinc/cp-kafka:8.3.1
     hostname: kafka
     container_name: monedula-quickstart-kafka
     ports:
@@ -77,7 +77,7 @@ services:
 
   # One-shot job: create the SCRAM users over the PLAINTEXT internal listener.
   kafka-init:
-    image: confluentinc/cp-kafka:8.0.0
+    image: confluentinc/cp-kafka:8.3.1
     container_name: monedula-quickstart-kafka-init
     depends_on:
       kafka:
@@ -96,7 +96,7 @@ services:
         echo "SCRAM users created"
 
   schema-registry:
-    image: confluentinc/cp-schema-registry:8.0.0
+    image: confluentinc/cp-schema-registry:8.3.1
     hostname: schema-registry
     container_name: monedula-quickstart-schema-registry
     depends_on:

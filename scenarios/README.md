@@ -38,7 +38,10 @@ human-readable README and the machine-checked e2e test.
 
 Every scenario directory contains:
 
-- `scenario.yaml` — metadata: `title`, `modes`, `cluster`, `summary`
+- `scenario.yaml` — metadata: `title`, `modes`, `cluster`, `summary`, and optional
+  `requires` (capabilities from the version matrix — `schemaregistry`, `mds` — that the
+  broker cell must offer; the runner skips the scenario, with a stated reason, on cells
+  that do not)
 - `manifests/` — the Kubernetes manifests to apply
 - `expect.yaml` — the declarative contract: CLI exit codes, k8s conditions, admission assertions, live Kafka state
 - `README.md` — human explanation of the teaching point, commands, and expected outcome

@@ -12,9 +12,11 @@ package confluent
 //	go test -tags integration ./internal/schemaregistry/confluent/ -v
 //
 // There is no dedicated testcontainers module for Schema Registry, so we wire
-// it by hand: a Kafka broker (via the testcontainers kafka module) and a
-// generic confluentinc/cp-schema-registry container share a docker network, and
-// SR is pointed at the broker's in-network PLAINTEXT (BROKER) listener.
+// it by hand: a Kafka broker (via matrix.StartBroker, which dispatches on the
+// cell's family — the testcontainers kafka module for Confluent-family cells,
+// a hand-rolled start path for Apache-family cells) and a generic
+// confluentinc/cp-schema-registry container share a docker network, and SR is
+// pointed at the broker's in-network PLAINTEXT (BROKER) listener.
 //
 // They SKIP cleanly (t.Skip) when Docker is unavailable — first via
 // testcontainers.SkipIfProviderIsNotHealthy, then as a belt-and-braces fallback
@@ -24,7 +26,6 @@ package confluent
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -32,19 +33,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
-	tckafka "github.com/testcontainers/testcontainers-go/modules/kafka"
 	"github.com/testcontainers/testcontainers-go/network"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	"github.com/monedula-dev/monedula-gitops/internal/matrix"
 	"github.com/monedula-dev/monedula-gitops/internal/schemaregistry"
 )
 
 const (
-	// kafkaImage is the confluent-local broker used by the kafka module. It
-	// exposes an in-network BROKER (PLAINTEXT) listener on port 9092.
-	kafkaImage = "confluentinc/confluent-local:7.6.1"
-	// srImage is the Confluent Schema Registry image run as a generic container.
-	srImage = "confluentinc/cp-schema-registry:7.6.1"
 	// kafkaAlias is the stable network alias the broker is reachable at from the
 	// SR container on the shared network.
 	kafkaAlias = "broker"
@@ -66,7 +62,7 @@ func startSchemaRegistry(t *testing.T) string {
 
 	net, err := network.New(ctx)
 	if err != nil {
-		if isDockerUnavailable(err) {
+		if matrix.IsDockerUnavailable(err) {
 			t.Skipf("Docker not available, skipping integration test: %v", err)
 		}
 		t.Fatalf("creating docker network: %v", err)
@@ -77,17 +73,22 @@ func startSchemaRegistry(t *testing.T) string {
 		}
 	})
 
-	kafkaC, err := tckafka.Run(ctx, kafkaImage,
-		network.WithNetwork([]string{kafkaAlias}, net),
-	)
+	cell, err := matrix.FromEnv()
 	if err != nil {
-		if isDockerUnavailable(err) {
+		t.Fatalf("resolving matrix cell: %v", err)
+	}
+	matrix.SkipWithoutCapability(t, cell, matrix.CapSchemaRegistry)
+	t.Logf("matrix cell %s: broker=%s sr=%s", cell.ID, cell.Image, cell.SchemaRegistryImage)
+
+	broker, err := matrix.StartBroker(ctx, cell, matrix.WithNetwork(net.Name, kafkaAlias))
+	if err != nil {
+		if matrix.IsDockerUnavailable(err) {
 			t.Skipf("Docker not available, skipping integration test: %v", err)
 		}
-		t.Fatalf("starting kafka container: %v", err)
+		t.Fatalf("starting kafka container for cell %s: %v", cell.ID, err)
 	}
 	t.Cleanup(func() {
-		if err := testcontainers.TerminateContainer(kafkaC); err != nil {
+		if err := testcontainers.TerminateContainer(broker); err != nil {
 			t.Logf("terminating kafka container: %v", err)
 		}
 	})
@@ -96,13 +97,13 @@ func startSchemaRegistry(t *testing.T) string {
 	// 9092, reachable via the kafka container's network alias.
 	srReq := testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
-			Image:        srImage,
+			Image:        cell.SchemaRegistryImage,
 			ExposedPorts: []string{srPort},
 			Networks:     []string{net.Name},
 			Env: map[string]string{
 				"SCHEMA_REGISTRY_HOST_NAME":                    "schemaregistry",
 				"SCHEMA_REGISTRY_LISTENERS":                    "http://0.0.0.0:8081",
-				"SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS": fmt.Sprintf("PLAINTEXT://%s:9092", kafkaAlias),
+				"SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS": "PLAINTEXT://" + broker.Internal,
 			},
 			WaitingFor: wait.ForHTTP("/subjects").
 				WithPort(srPort).
@@ -112,7 +113,7 @@ func startSchemaRegistry(t *testing.T) string {
 	}
 	srC, err := testcontainers.GenericContainer(ctx, srReq)
 	if err != nil {
-		if isDockerUnavailable(err) {
+		if matrix.IsDockerUnavailable(err) {
 			t.Skipf("Docker not available, skipping integration test: %v", err)
 		}
 		t.Fatalf("starting schema registry container: %v", err)
@@ -127,32 +128,6 @@ func startSchemaRegistry(t *testing.T) string {
 	require.NoError(t, err, "getting schema registry endpoint")
 	require.NotEmpty(t, endpoint, "schema registry returned empty endpoint")
 	return endpoint
-}
-
-// isDockerUnavailable heuristically detects a docker-connectivity failure from a
-// container-start error so we can t.Skip instead of t.Fatal. This is a fallback
-// behind SkipIfProviderIsNotHealthy.
-func isDockerUnavailable(err error) bool {
-	if err == nil {
-		return false
-	}
-	s := strings.ToLower(err.Error())
-	for _, needle := range []string{
-		"cannot connect to the docker daemon",
-		"docker daemon",
-		"dial unix",
-		"no such file or directory",
-		"connection refused",
-		"docker.sock",
-		"rootless docker not found",
-		"failed to find a viable docker",
-		"docker host",
-	} {
-		if strings.Contains(s, needle) {
-			return true
-		}
-	}
-	return false
 }
 
 // ctxT returns a per-test context with a generous timeout, tied to t.Cleanup.

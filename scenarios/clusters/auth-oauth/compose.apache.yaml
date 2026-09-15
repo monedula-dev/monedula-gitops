@@ -1,0 +1,25 @@
+# Overlay applied on top of compose.yaml for matrix cells whose family is
+# `apache`, merged as:
+#
+#   docker compose -f compose.yaml -f compose.apache.yaml ...
+#
+# The delta is narrow by design. The apache/kafka image mirrors the Confluent
+# image's configuration layout (/etc/kafka/docker/* instead of
+# /etc/confluent/docker/*) and applies KAFKA_* environment variables to broker
+# properties identically, so the whole security/listener/OAUTHBEARER
+# configuration in compose.yaml carries over untouched. What differs is the
+# tooling: /opt/kafka/bin is NOT on PATH, and the scripts carry a .sh suffix.
+#
+# This profile defines only the kafka service here (plus mock-oauth2, which
+# is not a Confluent/Apache Kafka image and needs no override). There is no
+# kafka-init: OAUTHBEARER credentials come from the mock OIDC server, not a
+# SCRAM bootstrap step.
+services:
+  kafka:
+    image: ${MONEDULA_KAFKA_IMAGE:-apache/kafka:4.3.1}
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "kafka:9094"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s

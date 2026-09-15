@@ -254,7 +254,7 @@ Success looks like:
   and `kafka-init` to finish, then check `docker compose logs schema-registry`.
 - **Schema Registry returns 401 on `apply`/`verify`/`import`.** The REST Basic-auth
   realm is rejecting the login. The JAAS `PropertyFileLoginModule` class path is
-  Jetty-version-sensitive; the configs target the pinned `cp-schema-registry:8.0.0`
+  Jetty-version-sensitive; the configs target the pinned `cp-schema-registry:8.3.1`
   (Jetty 12). If you change the image to a Jetty 9.4-11 build (cp 7.x) and start
   getting 401s, swap the class in `config/schema-registry-jaas.conf` back to
   `org.eclipse.jetty.jaas.spi.PropertyFileLoginModule`. To confirm which class the

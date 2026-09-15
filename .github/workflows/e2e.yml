@@ -1,0 +1,95 @@
+# The scenario suite (test/e2e/cli) across the broker versions tagged `e2e` in
+# internal/matrix/versions.yaml. Separate from ci.yml and off the PR path: each
+# cell brings up several Docker Compose stacks and takes 20-40 minutes, which is
+# too slow to gate a pull request. Running on push to main as well as nightly
+# means a regression is attached to a commit rather than to a date.
+name: e2e
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      e2e: ${{ steps.cells.outputs.e2e }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - id: cells
+        run: |
+          cells=$(go run ./hack/matrix-cells -tier=e2e)
+          echo "e2e=$cells" >> "$GITHUB_OUTPUT"
+
+  scenarios:
+    needs: matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      # One broken broker version must not hide the results of the others.
+      fail-fast: false
+      matrix:
+        cell: ${{ fromJSON(needs.matrix.outputs.e2e) }}
+    name: e2e (${{ matrix.cell }})
+    # `secrets` is not a valid context in a step-level `if` (GitHub's
+    # jobs.<job_id>.steps.<step_id>.if only allows github, needs, strategy,
+    # matrix, job, runner, env, vars, steps, inputs) — using it there fails
+    # evaluation for the whole workflow file. `jobs.<job_id>.env` DOES allow
+    # secrets, and step `if` DOES allow `env`, so hoist it here. Do not
+    # "simplify" this back to `if: ${{ secrets.DOCKERHUB_USERNAME != '' }}`.
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      # Authenticated pulls when credentials exist: several cells x several images
+      # per run risks Docker Hub's anonymous rate limit. The job still works
+      # without the secrets — it just risks being throttled.
+      - name: Log in to Docker Hub
+        if: env.DOCKERHUB_USERNAME != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      # cp-7.6-mds runs Confluent Server, a large image whose broker healthcheck
+      # has a 90s start_period, hence the generous timeout.
+      # -count=1 is required: the cell comes from an environment variable, which
+      # go test's result cache does not track — a cached "ok" from another cell
+      # would otherwise be reported as a pass for this one.
+      - name: Scenario suite
+        run: go test -tags e2e ./test/e2e/cli/ -v -timeout 60m -count=1
+        env:
+          MONEDULA_MATRIX_CELL: ${{ matrix.cell }}
+      # Without these, diagnosing why a broker failed to start on one version is
+      # guesswork: the failure surfaces as a compose timeout with no broker log.
+      - name: Collect compose logs
+        if: failure()
+        run: |
+          mkdir -p /tmp/compose-logs
+          for c in $(docker ps -aq); do
+            name=$(docker inspect --format '{{.Name}}' "$c" | tr -d '/')
+            docker logs "$c" > "/tmp/compose-logs/${name}.log" 2>&1 || true
+          done
+      - name: Upload compose logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compose-logs-${{ matrix.cell }}
+          path: /tmp/compose-logs
+          retention-days: 7
+          if-no-files-found: ignore
