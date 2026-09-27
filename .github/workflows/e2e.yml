@@ -77,19 +77,19 @@ jobs:
           MONEDULA_MATRIX_CELL: ${{ matrix.cell }}
       # Without these, diagnosing why a broker failed to start on one version is
       # guesswork: the failure surfaces as a compose timeout with no broker log.
-      - name: Collect compose logs
-        if: failure()
-        run: |
-          mkdir -p /tmp/compose-logs
-          for c in $(docker ps -aq); do
-            name=$(docker inspect --format '{{.Name}}' "$c" | tr -d '/')
-            docker logs "$c" > "/tmp/compose-logs/${name}.log" 2>&1 || true
-          done
+      # The harness writes these itself, in t.Cleanup, before it tears the
+      # stack down. An earlier version of this step shelled out to `docker ps`
+      # / `docker logs` here instead — and always collected nothing, because by
+      # the time the step runs the test binary has exited and `compose down -v`
+      # has already removed every container. It then "succeeded" with zero
+      # files, so red nightly cells shipped no diagnostics at all.
+      # `warn` rather than `ignore`: an empty upload should be visible, not
+      # silent, since that is exactly how the previous gap hid.
       - name: Upload compose logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: compose-logs-${{ matrix.cell }}
-          path: /tmp/compose-logs
+          path: compose-logs/
           retention-days: 7
-          if-no-files-found: ignore
+          if-no-files-found: warn

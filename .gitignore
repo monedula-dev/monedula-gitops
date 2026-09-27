@@ -8,3 +8,5 @@
 .claude/
 
 /docs/internal/
+
+/compose-logs/

@@ -187,7 +187,10 @@ func composeEnv() []string {
 // with "port is already allocated".
 func composeUp(t *testing.T, profileDir, project string) {
 	t.Helper()
-	t.Cleanup(func() { composeDown(profileDir, project) })
+	t.Cleanup(func() {
+		dumpComposeLogsOnFailure(t, profileDir, project)
+		composeDown(profileDir, project)
+	})
 	args := append([]string{"compose"}, composeFiles(profileDir)...)
 	args = append(args, "-p", project, "up", "-d", "--wait")
 	cmd := exec.Command("docker", args...)
@@ -268,6 +271,42 @@ func waitForInit(t *testing.T, profileDir, project, service string) {
 
 // composeDown tears down a Docker Compose stack, removing volumes.
 // It is called with best-effort semantics (logged but not fatal on error).
+// dumpComposeLogsOnFailure writes the stack's container logs to
+// <repoRoot>/compose-logs/<project>.log when the test has failed, before the
+// stack is torn down.
+//
+// This has to happen here, not in CI: the e2e workflow had a "collect compose
+// logs" step that shelled out to `docker ps`/`docker logs` after the test
+// binary exited, by which time t.Cleanup had already run `compose down -v` and
+// removed every container. The step therefore succeeded with zero files on
+// every failure, and (with if-no-files-found: ignore) uploaded nothing — so a
+// red nightly cell carried no container diagnostics at all.
+func dumpComposeLogsOnFailure(t *testing.T, profileDir, project string) {
+	t.Helper()
+	if !t.Failed() {
+		return
+	}
+	dir := filepath.Join(repoRoot, "compose-logs")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Logf("compose log capture: mkdir: %v", err)
+		return
+	}
+	args := append([]string{"compose"}, composeFiles(profileDir)...)
+	args = append(args, "-p", project, "logs", "--no-color")
+	cmd := exec.Command("docker", args...)
+	cmd.Env = composeEnv()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Logf("compose log capture: %v", err)
+	}
+	path := filepath.Join(dir, project+".log")
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		t.Logf("compose log capture: write %s: %v", path, err)
+		return
+	}
+	t.Logf("compose logs for %q written to %s (%d bytes)", project, path, len(out))
+}
+
 func composeDown(profileDir, project string) {
 	args := append([]string{"compose"}, composeFiles(profileDir)...)
 	args = append(args, "-p", project, "down", "-v")
@@ -286,7 +325,10 @@ func composeDown(profileDir, project string) {
 func composeUpMDS(t *testing.T, profileDir, project string) {
 	t.Helper()
 	// Teardown registered before start — see composeUp for why.
-	t.Cleanup(func() { composeDown(profileDir, project) })
+	t.Cleanup(func() {
+		dumpComposeLogsOnFailure(t, profileDir, project)
+		composeDown(profileDir, project)
+	})
 
 	// Start the stack detached; don't use --wait because compose v2 exits 1
 	// whenever any service container exits, even restart:"no" one-shots that
@@ -355,6 +397,58 @@ func runCLIBinary(args ...string) (string, int) {
 		}
 	}
 	return string(out), code
+}
+
+// readOnlyStepRuns are the scenario step commands that only observe the
+// cluster and never change it. Their assertions may be retried; a step that
+// mutates (apply, import, mutate) must run exactly once.
+var readOnlyStepRuns = map[string]bool{"verify": true, "diff": true, "doctor": true}
+
+// stepAssertionsPass reports whether a step's expectations already hold,
+// without recording a test failure. It decides only whether a read-only
+// command is worth re-running; the authoritative assertions run once
+// afterwards, so failure output is identical to a single-shot run.
+func stepAssertionsPass(out string, code int, exp *e2e.CommandExpect) bool {
+	if exp == nil {
+		return code == 0
+	}
+	if r := e2e.CheckExitCode(code, exp.ExitCode); !r.Pass {
+		return false
+	}
+	if r := e2e.CheckOutput(out, exp.OutputContains, exp.OutputMatches); !r.Pass {
+		return false
+	}
+	return true
+}
+
+// retryReadOnly re-runs a read-only CLI invocation until pass reports true or
+// the deadline passes, returning the last output and exit code either way.
+//
+// Kafka answers a mutation once the KRaft controller commits the record, but
+// the following read is served from the broker's metadata image, which applies
+// it a few tens of milliseconds later. A scenario that mutates and then
+// immediately verifies races that window: scenario 11 did exactly that and
+// failed on CI with "No changes." where it expected the drift to be reported,
+// while passing locally and on four consecutive nightly runs. This is the same
+// race already handled in the Go integration tier; here the unit that repeats
+// is a whole CLI invocation rather than a single API call.
+//
+// Only read-only commands reach this. Nothing that mutates is ever repeated,
+// and the expectations are untouched — a genuinely wrong result still fails,
+// just after the deadline instead of immediately.
+func retryReadOnly(run func() (string, int), pass func(string, int) bool) (string, int) {
+	const (
+		deadline = 30 * time.Second
+		interval = 250 * time.Millisecond
+	)
+	stop := time.Now().Add(deadline)
+	for {
+		out, code := run()
+		if pass(out, code) || time.Now().After(stop) {
+			return out, code
+		}
+		time.Sleep(interval)
+	}
 }
 
 // scenarioManifestsDir resolves the manifests directory a mode should apply
@@ -483,7 +577,17 @@ func checkLiveState(t *testing.T, scenarioDir, clusterConfigFile string, exp *e2
 	if !hasLiveState {
 		return
 	}
-	checkOut, checkCode := runCLIBinary("e2e", "check", "--scenario", scenarioDir, "--mode", "cli", "--cluster-config", clusterConfigFile)
+	// `e2e check` only reads live state, so it is retried on the same grounds
+	// as the read-only scenario steps: it runs straight after an apply, which
+	// is exactly the window where the broker's metadata image still lags the
+	// controller commit.
+	runCheck := func() (string, int) {
+		return runCLIBinary("e2e", "check", "--scenario", scenarioDir, "--mode", "cli", "--cluster-config", clusterConfigFile)
+	}
+	checkOut, checkCode := runCheck()
+	if checkCode != 0 {
+		checkOut, checkCode = retryReadOnly(runCheck, func(_ string, c int) bool { return c == 0 })
+	}
 	t.Logf("=== e2e check output (exit %d) ===\n%s", checkCode, checkOut)
 	if checkCode != 0 {
 		t.Errorf("e2e check failed (exit %d):\n%s", checkCode, checkOut)
@@ -509,7 +613,13 @@ func runSteps(t *testing.T, scenarioDir, clusterConfigFile string, steps []e2e.S
 			}
 			args := []string{st.Run, "-f", manifests, "--cluster-config-file", clusterConfigFile}
 			args = append(args, st.Flags...)
-			out, code := runCLIBinary(args...)
+			run := func() (string, int) { return runCLIBinary(args...) }
+			out, code := run()
+			if readOnlyStepRuns[st.Run] && !stepAssertionsPass(out, code, st.Expect) {
+				out, code = retryReadOnly(run, func(o string, c int) bool {
+					return stepAssertionsPass(o, c, st.Expect)
+				})
+			}
 			t.Logf("=== step %d: %s (exit %d) ===\n%s", i, st.Run, code, out)
 			if st.Expect != nil {
 				if r := e2e.CheckExitCode(code, st.Expect.ExitCode); !r.Pass {
@@ -553,7 +663,13 @@ func runSteps(t *testing.T, scenarioDir, clusterConfigFile string, steps []e2e.S
 		case "doctor":
 			args := []string{"doctor", "--cluster-config-file", clusterConfigFile}
 			args = append(args, st.Flags...)
-			out, code := runCLIBinary(args...)
+			run := func() (string, int) { return runCLIBinary(args...) }
+			out, code := run()
+			if !stepAssertionsPass(out, code, st.Expect) {
+				out, code = retryReadOnly(run, func(o string, c int) bool {
+					return stepAssertionsPass(o, c, st.Expect)
+				})
+			}
 			t.Logf("=== step %d: doctor (exit %d) ===\n%s", i, code, out)
 			if st.Expect != nil {
 				if r := e2e.CheckExitCode(code, st.Expect.ExitCode); !r.Pass {
