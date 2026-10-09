@@ -22,4 +22,4 @@ resources:
 images:
 - name: ghcr.io/monedula-dev/monedula-gitops
   newName: ghcr.io/monedula-dev/monedula-gitops
-  newTag: "0.8.0"
+  newTag: "1.0.0"

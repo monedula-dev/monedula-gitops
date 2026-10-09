@@ -5,6 +5,11 @@ the [`release.yaml`](../.github/workflows/release.yaml) workflow.
 
 ## Cutting a release
 
+The workflow does not touch the Kustomize install. Before tagging, set the
+operator image in `config/default/kustomization.yaml` (`newTag`) and
+`config/manager/manager.yaml` (`image`) to the version without the `v`, so
+`kubectl apply -k ...?ref=vX.Y.Z` deploys the image that tag built.
+
 ```bash
 git tag v0.20.0
 git push origin v0.20.0
