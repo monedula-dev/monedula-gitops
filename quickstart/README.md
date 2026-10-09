@@ -25,4 +25,4 @@ use in a real deployment.
 
 - CLI walkthrough: [`cli/README.md`](cli/README.md)
 - Operator walkthrough: [`k8s/README.md`](k8s/README.md)
-- Full tool documentation: the [repo root README](../README.md)
+- Full tool documentation: [monedula.dev/flock/docs/gitops](https://monedula.dev/flock/docs/gitops/)
