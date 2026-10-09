@@ -5,6 +5,57 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.0.0] - 2026-10-09
+
+First stable release. Since 0.1.0 it updates dependencies, backs the documented support matrix
+with continuous CI against real brokers, moves the reference documentation to the website, and
+fixes the Kustomize install's stale image pin.
+
+### Added
+- **Docs:** a *Validated versions* table in the README listing exactly the broker versions CI
+  runs against: Apache Kafka 3.9, 4.0, and 4.3 (official `apache/kafka` images), Confluent
+  Platform 7.6, 7.9, 8.0, and 8.3, and Confluent Server 7.6 with MDS. Adapter integration tests
+  run against every version on each pull request; the full scenario suite runs against a subset
+  (Apache Kafka 4.3, Confluent Platform 7.9 and 8.3, and Confluent Server 7.6 with MDS) nightly
+  and on every push to `main`. The table is generated from `internal/matrix/versions.yaml`
+  (`make matrix-docs`) and CI fails if it is stale. It replaces the previous support claim,
+  which no CI job actually exercised.
+
+### Changed
+- **Dependencies:** built against the Kubernetes 1.37 client libraries (`k8s.io/api`,
+  `k8s.io/apimachinery`, `k8s.io/client-go` 0.36.0 → 0.37.1) and `controller-runtime`
+  0.24.1 → 0.25.1; Kafka client `franz-go` 1.21.2 → 1.22.0 (`kadm` 1.19.0, `kmsg` 1.14.0);
+  `prometheus/client_golang` 1.23.2 → 1.24.1; `golang.org/x/oauth2` 0.36.0 → 0.37.0;
+  `go-logr/logr` 1.4.3 → 1.4.4. CRD schemas are unchanged.
+- **Quickstarts:** the CLI and Kubernetes quickstarts now pin Confluent Platform 8.3.1
+  (`cp-kafka`, `cp-schema-registry`), up from 8.0.0.
+- **Helm chart:** the chart description now lists all six managed kinds.
+- **Docs:** the README is now a short overview, and the reference pages under `docs/` (CLI,
+  connecting, manifest reference, operator, schemas) are removed. The full documentation,
+  including installation, the support matrix, the resource and CLI reference and the comparison
+  with other tools, is at [monedula.dev/flock/docs/gitops](https://monedula.dev/flock/docs/gitops/).
+  `docs/releasing.md` stays for maintainers.
+
+### Fixed
+- **Docs:** corrected the *Alternatives* comparison, which is now
+  [How monedula-gitops compares](https://monedula.dev/flock/docs/gitops/concepts/comparisons/)
+  in the docs. Confluent for Kubernetes has no
+  declarative ACL resource (its access model is RBAC role bindings), JulieOps and kafka-gitops
+  manage Confluent Cloud service accounts rather than broker-side SCRAM credentials, and Jikkou
+  does not watch or reconcile CRDs, so it is no longer listed as an operator.
+- **Docs:** the removed `docs/` pages contradicted the code in places, for example that the CLI
+  deletes topics under `deletionPolicy: Delete` with `--allow-delete` (it never plans a topic
+  or subject deletion), that IP quotas, RBAC import and `accessBackends` were not implemented
+  yet (they are), and that `allow-delete` gates `KafkaRoleBinding` deletion (it does not).
+  The website docs state the actual behavior.
+- **Kustomize install:** `config/default` and `config/manager` pinned the operator image to a
+  stale `0.8.0`, so `kubectl apply -k ...?ref=v0.1.0` did not deploy the release's image. They
+  now pin `1.0.0`, and `docs/releasing.md` says to bump the pin before tagging.
+- **CLI:** the `operator --enable-webhooks` help text names all five kinds the admission
+  webhooks validate; it named only `KafkaTopic`.
+
 ## [0.1.0] - 2026-08-20
 
 First public release.
@@ -298,4 +349,6 @@ First public release.
   batched `DescribeTopicConfigs` request for all topics instead of one round-trip per topic
   (per-topic error semantics and result ordering are unchanged).
 
-[Unreleased]: https://github.com/monedula-dev/monedula-gitops/commits/main
+[Unreleased]: https://github.com/monedula-dev/monedula-gitops/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/monedula-dev/monedula-gitops/compare/v0.1.0...v1.0.0
+[0.1.0]: https://github.com/monedula-dev/monedula-gitops/releases/tag/v0.1.0

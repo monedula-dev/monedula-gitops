@@ -1,9 +1,9 @@
 apiVersion: v2
 name: monedula-gitops
-description: Kafka GitOps operator — manages KafkaCluster, KafkaTopic, and KafkaAccessPolicy resources.
+description: Kafka GitOps operator — manages KafkaCluster, KafkaTopic, KafkaAccessPolicy, KafkaQuota, KafkaRoleBinding, and KafkaUser resources.
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 1.0.0
+appVersion: "1.0.0"
 kubeVersion: ">=1.25.0-0"
 home: https://github.com/monedula-dev/monedula-gitops
 sources:
