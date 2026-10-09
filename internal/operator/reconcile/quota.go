@@ -32,7 +32,8 @@ import (
 // zero-out another team's quota (a denial-of-service path). Entity-level
 // scoping is NOT enforced: a quota targets a principal/client-id, which the
 // topic-prefix rules cannot scope, so prefix-restricted namespaces get no
-// additional entity check (documented limitation; see docs/operator.md).
+// additional entity check (documented limitation; see
+// https://monedula.dev/flock/docs/gitops/how-to/enforce-tenancy/).
 func ReconcileQuota(ctx context.Context, q *v1alpha1.KafkaQuota, cluster *v1alpha1.KafkaCluster,
 	k kafka.AdminClient) (v1alpha1.KafkaQuotaStatus, error) {
 

@@ -14,8 +14,9 @@ import (
 
 // minResyncInterval is the floor --resync-interval enforces: a shorter cadence
 // risks the periodic resync becoming a self-inflicted load problem (each
-// resync re-lists ACLs/quotas/role bindings per kind — see docs/operator.md's
-// Scaling section) rather than the safety-net it is meant to be.
+// resync re-lists ACLs/quotas/role bindings per kind; see the Reconciliation
+// section of https://monedula.dev/flock/docs/gitops/how-to/configure-the-operator/)
+// rather than the safety-net it is meant to be.
 const minResyncInterval = 30 * time.Second
 
 // newOperatorCmd builds the `operator` command, which runs the controller-runtime
@@ -63,16 +64,17 @@ func newOperatorCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.ClusterNamespace, "cluster-namespace", "",
 		"namespace to resolve KafkaCluster refs from (empty: each object's own namespace)")
 	cmd.Flags().BoolVar(&opts.EnableWebhooks, "enable-webhooks", false,
-		"enable the KafkaTopic identity validating admission webhook (requires serving certs; spec §20.3)")
+		"enable the validating admission webhooks for KafkaTopic, KafkaQuota, KafkaAccessPolicy, "+
+			"KafkaRoleBinding, and KafkaUser (requires serving certs; spec §20.3)")
 	cmd.Flags().StringVar(&opts.WebhookCertDir, "webhook-cert-dir", "",
 		"directory holding the webhook server's serving cert/key (empty: controller-runtime default; only used with --enable-webhooks)")
 	cmd.Flags().DurationVar(&opts.ResyncInterval, "resync-interval", controller.DefaultResyncInterval,
 		fmt.Sprintf("periodic resync cadence for every reconciler (minimum %s); a healthy resource is "+
 			"re-checked on this cadence even without a spec change, so it also bounds duplicate-identity "+
-			"loser recovery latency (see docs/operator.md Scaling)", minResyncInterval))
+			"loser recovery latency", minResyncInterval))
 	cmd.Flags().IntVar(&opts.MaxConcurrentReconciles, "max-concurrent-reconciles", controller.DefaultMaxConcurrentReconciles,
 		"reconcile concurrency per kind; >1 requires --leader-elect (in-process serialization "+
-			"protects shared cluster state; see docs/operator.md Scaling)")
+			"protects shared cluster state)")
 	return cmd
 }
 

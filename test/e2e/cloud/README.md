@@ -2,8 +2,9 @@
 
 An **opt-in, maintainer-run** test suite that validates monedula-gitops against a
 real Confluent Cloud cluster. The support matrix in
-[docs/connecting.md](../../../docs/connecting.md) marks Confluent Cloud as
-⚠️ untested; this harness is how a maintainer turns that ⚠️ into evidence.
+[Supported platforms and versions](https://monedula.dev/flock/docs/gitops/concepts/supported-platforms/#support-matrix)
+marks a Confluent Cloud capability as validated only after a run of this
+harness; it is how a maintainer turns an untested claim into evidence.
 
 It exercises what *should* work on Cloud (topics, ACLs, schemas, import) and
 proves that what Cloud does *not* expose through the Kafka Admin API (client
@@ -124,6 +125,8 @@ Gating behavior:
 | `09_import` | core trio | `import cluster` emits the run topic, skips internal topics, leaks no secrets (falls back to `--skip-users` if Cloud rejects SCRAM listing) |
 | summary | — | fixed-width verdict table (Topics / ACLs / Schemas / Quotas / Users / Import) |
 
-A validated run does **not** by itself change the support matrix — update
-[docs/connecting.md](../../../docs/connecting.md) with the summary table from
-the log, citing the run date and cluster type.
+A validated run does **not** by itself change the support matrix: update the
+Confluent Cloud column and section of
+[Supported platforms and versions](https://monedula.dev/flock/docs/gitops/concepts/supported-platforms/)
+on monedula.dev from the summary table in the log, citing the run
+date and cluster type.

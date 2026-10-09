@@ -2,9 +2,10 @@
 
 // Package cloude2e is the opt-in Confluent Cloud validation harness.
 //
-// The docs support matrix (docs/connecting.md) marks Confluent Cloud as
-// "untested". This suite is the credential-gated test a maintainer runs
-// against a REAL Confluent Cloud cluster to turn that claim into evidence:
+// The docs support matrix (https://monedula.dev/flock/docs/gitops/concepts/supported-platforms/)
+// marks a Confluent Cloud capability as validated only after a run of this
+// suite: the credential-gated test a maintainer runs against a REAL
+// Confluent Cloud cluster to turn an untested claim into evidence:
 // it exercises what should work there (topics, ACLs, schemas, import) and
 // proves that what Cloud does not expose (client quotas and SCRAM users via
 // the Kafka Admin API) fails gracefully — non-zero exit, broker error text,

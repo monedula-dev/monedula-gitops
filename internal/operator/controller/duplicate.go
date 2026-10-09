@@ -62,7 +62,8 @@
 // recovers at its next periodic resync (RequeueAfter, the configured
 // --resync-interval — default 5 minutes) at worst. This is an accepted
 // trade-off — a duplicate identity is a configuration error, not a hot path —
-// and is documented in docs/operator.md.
+// and is documented under resyncInterval in
+// https://monedula.dev/flock/docs/gitops/how-to/configure-the-operator/.
 //
 // # Quorum recheck (D1, v0.37)
 //
