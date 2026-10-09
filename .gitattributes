@@ -1,0 +1,5 @@
+# Check every text file out with LF, whatever core.autocrlf says. Tests compare
+# fixtures and generated manifests byte-for-byte against LF output, gofmt
+# expects LF, and hack/*.sh must run under Git Bash; a CRLF checkout on Windows
+# breaks all three.
+* text=auto eol=lf

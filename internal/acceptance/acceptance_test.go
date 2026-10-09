@@ -6,13 +6,34 @@
 package acceptance
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+// The binary is built on first use and shared by every test: each test only
+// executes it, and linking it per test cost ~10s apiece on Windows, which put
+// the package past go test's default 10m timeout.
+var (
+	buildOnce sync.Once
+	binDir    string
+	builtBin  string
+	buildErr  error
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if binDir != "" {
+		_ = os.RemoveAll(binDir)
+	}
+	os.Exit(code)
+}
 
 // buildBinary compiles the CLI once into a temp dir and returns the binary path
 // plus the repository root (used as the working dir so ./testdata paths
@@ -24,12 +45,25 @@ func buildBinary(t *testing.T) (bin string, repoRoot string) {
 	// This test file lives in internal/acceptance, so the repo root is two
 	// levels up.
 	repoRoot = filepath.Clean(filepath.Join(wd, "..", ".."))
-	bin = filepath.Join(t.TempDir(), "monedula-gitops")
-	cmd := exec.Command("go", "build", "-o", bin, "./cmd/monedula-gitops")
-	cmd.Dir = repoRoot
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "build failed: %s", out)
-	return bin, repoRoot
+	buildOnce.Do(func() {
+		binDir, buildErr = os.MkdirTemp("", "monedula-acceptance-*")
+		if buildErr != nil {
+			return
+		}
+		// The .exe suffix is required on Windows: os/exec resolves executables
+		// through PATHEXT, so an extensionless binary fails to start.
+		builtBin = filepath.Join(binDir, "monedula-gitops")
+		if runtime.GOOS == "windows" {
+			builtBin += ".exe"
+		}
+		cmd := exec.Command("go", "build", "-o", builtBin, "./cmd/monedula-gitops")
+		cmd.Dir = repoRoot
+		if out, err := cmd.CombinedOutput(); err != nil {
+			buildErr = fmt.Errorf("build failed: %w: %s", err, out)
+		}
+	})
+	require.NoError(t, buildErr)
+	return builtBin, repoRoot
 }
 
 // runCLI runs the binary from repoRoot, returning combined output and the

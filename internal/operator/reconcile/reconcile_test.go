@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	k8smeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -731,7 +732,16 @@ func TestReconcileTopicPreservesTransitionTime(t *testing.T) {
 	}
 
 	// Third reconcile where the condition flips to False (live-state read error)
-	// MUST update LastTransitionTime.
+	// MUST update LastTransitionTime. Backdate the seeded transition first: the
+	// flip is stamped with time.Now() microseconds after t2, and a coarse clock
+	// (Windows) can return the same reading, making a correct update look like
+	// none.
+	for i := range st2.Conditions {
+		if st2.Conditions[i].Type == v1alpha1.CondReady {
+			st2.Conditions[i].LastTransitionTime = metav1.NewTime(t2.Add(-time.Hour))
+		}
+	}
+	seeded := readyTime(st2.Conditions)
 	k3 := &getTopicFailClient{Client: kafkamock.New(nil, nil), err: errors.New("broker unreachable")}
 	tp.Status = &st2
 	st3, _ := ReconcileTopic(context.Background(), tp, cluster(), k3, nil, stubResolver{}, nil, nil, nil)
@@ -739,7 +749,7 @@ func TestReconcileTopicPreservesTransitionTime(t *testing.T) {
 	if s, _, _ := condStatus(st3.Conditions, v1alpha1.CondReady); s != metav1.ConditionFalse {
 		t.Fatalf("Ready = %v, want False (live-state error)", s)
 	}
-	if t3.Equal(&t2) {
+	if t3.Equal(&seeded) {
 		t.Fatalf("Ready LastTransitionTime NOT updated when status flipped: still %v", t3)
 	}
 }
