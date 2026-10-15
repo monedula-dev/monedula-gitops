@@ -10,7 +10,7 @@ require (
 	github.com/stretchr/testify v1.12.1
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/kafka v0.44.0
-	github.com/twmb/franz-go v1.22.0
+	github.com/twmb/franz-go v1.22.1
 	github.com/twmb/franz-go/pkg/kadm v1.19.0
 	github.com/twmb/franz-go/pkg/kmsg v1.14.0
 	golang.org/x/oauth2 v0.37.0
