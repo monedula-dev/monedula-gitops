@@ -1,6 +1,10 @@
 package v1alpha1
 
-import "testing"
+import (
+	"testing"
+
+	"k8s.io/apimachinery/pkg/runtime"
+)
 
 func TestMirrorEffectiveTopicName(t *testing.T) {
 	s := KafkaMirrorTopicSpec{SourceTopicName: "payments.orders"}
@@ -35,5 +39,29 @@ func TestKafkaClusterRESTDeepCopy(t *testing.T) {
 	out.Spec.REST.ClusterID = "other"
 	if in.Spec.REST.ClusterID != "lkc-1" {
 		t.Fatal("DeepCopy aliases rest")
+	}
+}
+
+func TestMirrorKindsRegistered(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"KafkaMirrorTopic", "KafkaMirrorTopicList"} {
+		if !scheme.Recognizes(GroupVersion.WithKind(k)) {
+			t.Fatalf("%s not registered", k)
+		}
+	}
+}
+
+func TestMirrorStatusDeepCopyRoundTrip(t *testing.T) {
+	in := &KafkaMirrorTopic{Status: &KafkaMirrorTopicStatus{
+		Phase: "Ready", Drift: &DriftStatus{Detected: true, Fields: []string{"config"}},
+	}}
+	out := in.DeepCopy()
+	out.Status.Drift.Fields[0] = "x"
+	out.Status.Drift.Detected = false
+	if in.Status.Drift.Fields[0] != "config" || !in.Status.Drift.Detected {
+		t.Fatal("DeepCopy aliases status")
 	}
 }
