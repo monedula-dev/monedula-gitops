@@ -41,10 +41,34 @@ type Snapshot struct {
 	Mirrors                       map[string]kafkarest.Mirror
 	Links                         map[string]LinkInfo
 	Err                           error
+	read                          bool // set only by NewSnapshot; zero-value snapshots fail closed
+}
+
+// NewSnapshot builds a populated snapshot without I/O, applying the same
+// identity rules as ReadSnapshot's success path. Nil maps become empty.
+func NewSnapshot(adminClusterID, restClusterID string, topics map[string]kafka.TopicState, mirrors map[string]kafkarest.Mirror, links map[string]LinkInfo) Snapshot {
+	s := Snapshot{AdminClusterID: adminClusterID, RESTClusterID: restClusterID}
+	if adminClusterID == "" || restClusterID == "" || adminClusterID != restClusterID {
+		s.Err = fmt.Errorf("%w: kafka admin cluster id %q, rest cluster id %q",
+			ErrClusterIdentityMismatch, adminClusterID, restClusterID)
+		return s
+	}
+	if topics == nil {
+		topics = map[string]kafka.TopicState{}
+	}
+	if mirrors == nil {
+		mirrors = map[string]kafkarest.Mirror{}
+	}
+	if links == nil {
+		links = map[string]LinkInfo{}
+	}
+	s.Topics, s.Mirrors, s.Links = topics, mirrors, links
+	s.read = true
+	return s
 }
 
 // Complete reports whether all required reads succeeded.
-func (s Snapshot) Complete() bool { return s.Err == nil }
+func (s Snapshot) Complete() bool { return s.read && s.Err == nil }
 
 // ReadSnapshot reads Kafka and REST state. A linkName absent from the link list
 // gets no LinkInfo entry.
@@ -73,33 +97,41 @@ func ReadSnapshot(ctx context.Context, k kafka.AdminClient, r kafkarest.Client, 
 		s.Err = fmt.Errorf("list links: %w", err)
 		return s
 	}
-	s.Topics = make(map[string]kafka.TopicState, len(topics))
+	tm := make(map[string]kafka.TopicState, len(topics))
 	for _, t := range topics {
-		s.Topics[t.Name] = t
+		tm[t.Name] = t
 	}
-	s.Mirrors = make(map[string]kafkarest.Mirror, len(mirrors))
+	mm := make(map[string]kafkarest.Mirror, len(mirrors))
 	for _, m := range mirrors {
-		s.Mirrors[m.MirrorTopicName] = m
+		if _, dup := mm[m.MirrorTopicName]; dup {
+			s.Err = fmt.Errorf("duplicate mirror topic name %q in REST response", m.MirrorTopicName)
+			return s
+		}
+		mm[m.MirrorTopicName] = m
 	}
 	byName := make(map[string]kafkarest.Link, len(links))
 	for _, l := range links {
+		if _, dup := byName[l.Name]; dup {
+			s.Err = fmt.Errorf("duplicate link name %q in REST response", l.Name)
+			return s
+		}
 		byName[l.Name] = l
 	}
-	s.Links = map[string]LinkInfo{}
+	lm := map[string]LinkInfo{}
 	for _, n := range linkNames {
 		l, ok := byName[n]
 		if !ok {
 			continue
 		}
 		cfg, cerr := r.LinkConfigs(ctx, n)
-		s.Links[n] = LinkInfo{Link: l, Configs: cfg, ConfigErr: cerr}
+		lm[n] = LinkInfo{Link: l, Configs: cfg, ConfigErr: cerr}
 	}
-	return s
+	return NewSnapshot(aid, rid, tm, mm, lm)
 }
 
 // Classify returns the ownership class of a destination topic name.
 func (s Snapshot) Classify(topic string) Classification {
-	if s.Err != nil {
+	if !s.Complete() {
 		return Unknown
 	}
 	_, hasTopic := s.Topics[topic]

@@ -14,6 +14,9 @@ import (
 
 func TestClassify(t *testing.T) {
 	topic := map[string]kafka.TopicState{"x": {Name: "x"}}
+	ns := func(topics map[string]kafka.TopicState, m map[string]kafkarest.Mirror) Snapshot {
+		return NewSnapshot("A", "A", topics, m, nil)
+	}
 	mir := func(st string) map[string]kafkarest.Mirror {
 		return map[string]kafkarest.Mirror{"x": {MirrorTopicName: "x", Status: st}}
 	}
@@ -22,25 +25,27 @@ func TestClassify(t *testing.T) {
 		s    Snapshot
 		want Classification
 	}{
-		{"absent", Snapshot{}, Absent},
-		{"normal", Snapshot{Topics: topic}, Normal},
-		{"active", Snapshot{Topics: topic, Mirrors: mir("ACTIVE")}, Mirror},
-		{"failed", Snapshot{Topics: topic, Mirrors: mir("FAILED")}, Mirror},
-		{"pending mirror", Snapshot{Topics: topic, Mirrors: mir("PENDING_MIRROR")}, Mirror},
-		{"stopping", Snapshot{Topics: topic, Mirrors: mir("PENDING_STOPPED")}, StoppingMirror},
-		{"stopped", Snapshot{Topics: topic, Mirrors: mir("STOPPED")}, StoppedFormerMirror},
-		{"stopped no topic", Snapshot{Mirrors: mir("STOPPED")}, Unknown},
-		{"active no topic", Snapshot{Mirrors: mir("ACTIVE")}, Unknown},
-		{"weird", Snapshot{Topics: topic, Mirrors: mir("WEIRD")}, Unknown},
+		{"absent", ns(nil, nil), Absent},
+		{"normal", ns(topic, nil), Normal},
+		{"active", ns(topic, mir("ACTIVE")), Mirror},
+		{"failed", ns(topic, mir("FAILED")), Mirror},
+		{"pending mirror", ns(topic, mir("PENDING_MIRROR")), Mirror},
+		{"stopping", ns(topic, mir("PENDING_STOPPED")), StoppingMirror},
+		{"stopped", ns(topic, mir("STOPPED")), StoppedFormerMirror},
+		{"stopped no topic", ns(nil, mir("STOPPED")), Unknown},
+		{"active no topic", ns(nil, mir("ACTIVE")), Unknown},
+		{"weird", ns(topic, mir("WEIRD")), Unknown},
 		{"err", Snapshot{Err: errors.New("boom")}, Unknown},
 		{"err with data", Snapshot{Err: errors.New("boom"), Topics: topic}, Unknown},
+		{"zero value", Snapshot{}, Unknown},
+		{"stopping no topic", ns(nil, mir("PENDING_STOPPED")), Unknown},
 	}
 	for _, c := range cases {
 		if got := c.s.Classify("x"); got != c.want {
 			t.Errorf("%s: got %s want %s", c.name, got, c.want)
 		}
 	}
-	if (Snapshot{Err: errors.New("e")}).Complete() || !(Snapshot{}).Complete() {
+	if (Snapshot{Err: errors.New("e")}).Complete() || (Snapshot{}).Complete() || !ns(nil, nil).Complete() {
 		t.Error("Complete wrong")
 	}
 }
@@ -128,5 +133,35 @@ func TestReadSnapshotLinkConfigFailureIsPerLink(t *testing.T) {
 	s := ReadSnapshot(context.Background(), k, r, []string{"l"})
 	if s.Err != nil || s.Links["l"].ConfigErr == nil {
 		t.Fatalf("err=%v links=%v", s.Err, s.Links)
+	}
+}
+
+func TestReadSnapshotBothIDsEmpty(t *testing.T) {
+	k, r := fixtures("", "")
+	s := ReadSnapshot(context.Background(), k, r, nil)
+	if !errors.Is(s.Err, ErrClusterIdentityMismatch) {
+		t.Fatal(s.Err)
+	}
+}
+
+func TestNewSnapshotEmptyIDs(t *testing.T) {
+	s := NewSnapshot("", "", nil, nil, nil)
+	if !errors.Is(s.Err, ErrClusterIdentityMismatch) || s.Complete() {
+		t.Fatal(s.Err)
+	}
+}
+
+func TestReadSnapshotDuplicates(t *testing.T) {
+	k, r := fixtures("A", "A")
+	r.AddMirror(kafkarest.Mirror{LinkName: "l1", MirrorTopicName: "x", Status: "ACTIVE"})
+	r.AddMirror(kafkarest.Mirror{LinkName: "l2", MirrorTopicName: "x", Status: "ACTIVE"})
+	if s := ReadSnapshot(context.Background(), k, r, nil); s.Err == nil || s.Classify("x") != Unknown {
+		t.Error("duplicate mirror must fail closed")
+	}
+	k, r = fixtures("A", "A")
+	r.AddLink(kafkarest.Link{Name: "l"}, nil)
+	r.AddLink(kafkarest.Link{Name: "l"}, nil)
+	if s := ReadSnapshot(context.Background(), k, r, nil); s.Err == nil {
+		t.Error("duplicate link must set Err")
 	}
 }
