@@ -134,6 +134,17 @@ type KafkaClusterSpec struct {
 	Defaults         *ClusterDefaults     `json:"defaults,omitempty"`
 	Tenancy          *TenancyConfig       `json:"tenancy,omitempty"`
 	Authorization    *AuthorizationConfig `json:"authorization,omitempty"`
+	// REST is the Kafka REST / cluster-linking endpoint used by KafkaMirrorTopic.
+	REST *KafkaRESTConfig `json:"rest,omitempty"`
+}
+
+// KafkaRESTConfig is the Kafka REST (v3) connection used for cluster-link
+// mirror topics. Auth has the same shape as authorization.mds.auth.
+type KafkaRESTConfig struct {
+	Endpoint  string     `json:"endpoint"`
+	Auth      *MDSAuth   `json:"auth,omitempty"`
+	TLS       *TLSConfig `json:"tls,omitempty"`
+	ClusterID string     `json:"clusterId,omitempty"`
 }
 
 // AuthorizationConfig configures authorization backends beyond plain ACLs. MDS
@@ -770,4 +781,77 @@ type KafkaUserStatus struct {
 type AppliedPasswordRef struct {
 	SecretName      string `json:"secretName,omitempty"`
 	ResourceVersion string `json:"resourceVersion,omitempty"`
+}
+
+// ---- KafkaMirrorTopic ----
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Cluster",type=string,JSONPath=".spec.clusterRef.name"
+// +kubebuilder:printcolumn:name="Link",type=string,JSONPath=".spec.linkName"
+// +kubebuilder:printcolumn:name="Source",type=string,JSONPath=".spec.sourceTopicName"
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
+// +kubebuilder:printcolumn:name="Mirror",type=string,JSONPath=".status.observedMirrorStatus"
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
+
+type KafkaMirrorTopic struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Spec              KafkaMirrorTopicSpec    `json:"spec,omitempty"`
+	Status            *KafkaMirrorTopicStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+type KafkaMirrorTopicList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []KafkaMirrorTopic `json:"items"`
+}
+
+// KafkaMirrorTopicSpec declares a cluster-link mirror topic. Identity fields are
+// immutable at the API server via CEL transition rules; an empty explicit
+// topicName is treated as omitted (the effective name is sourceTopicName).
+// +kubebuilder:validation:XValidation:rule="self.clusterRef.name == oldSelf.clusterRef.name",message="spec.clusterRef.name is immutable"
+// +kubebuilder:validation:XValidation:rule="self.linkName == oldSelf.linkName",message="spec.linkName is immutable"
+// +kubebuilder:validation:XValidation:rule="self.sourceTopicName == oldSelf.sourceTopicName",message="spec.sourceTopicName is immutable"
+// +kubebuilder:validation:XValidation:rule="((has(oldSelf.topicName) && oldSelf.topicName != '') ? oldSelf.topicName : oldSelf.sourceTopicName) == ((has(self.topicName) && self.topicName != '') ? self.topicName : self.sourceTopicName)",message="the effective destination topic name is immutable (a different name needs a new KafkaMirrorTopic)"
+type KafkaMirrorTopicSpec struct {
+	ClusterRef      ClusterRef `json:"clusterRef"`
+	LinkName        string     `json:"linkName"`
+	SourceTopicName string     `json:"sourceTopicName"`
+	// TopicName is the destination topic name; empty means sourceTopicName.
+	TopicName string `json:"topicName,omitempty"`
+	// +kubebuilder:validation:Minimum=1
+	ReplicationFactor *int              `json:"replicationFactor,omitempty"`
+	Config            map[string]string `json:"config,omitempty"`
+	Reconciliation    *Reconciliation   `json:"reconciliation,omitempty"`
+	// DeletionPolicy is present only so that Delete is rejected: without the
+	// field the API server would silently prune an unknown deletionPolicy.
+	// Mirror topics are always orphaned on delete.
+	// +kubebuilder:validation:Enum=Orphan
+	DeletionPolicy string `json:"deletionPolicy,omitempty"`
+}
+
+// EffectiveTopicName returns the destination topic name: TopicName when set,
+// otherwise SourceTopicName.
+func (s KafkaMirrorTopicSpec) EffectiveTopicName() string {
+	if s.TopicName != "" {
+		return s.TopicName
+	}
+	return s.SourceTopicName
+}
+
+// KafkaMirrorTopicStatus is the observed state of a KafkaMirrorTopic.
+type KafkaMirrorTopicStatus struct {
+	ObservedGeneration           int64              `json:"observedGeneration,omitempty"`
+	Phase                        string             `json:"phase,omitempty"`
+	Conditions                   []metav1.Condition `json:"conditions,omitempty"`
+	ObservedMirrorStatus         string             `json:"observedMirrorStatus,omitempty"`
+	LinkName                     string             `json:"linkName,omitempty"`
+	SourceTopicName              string             `json:"sourceTopicName,omitempty"`
+	LastObservedStatusChangeTime *metav1.Time       `json:"lastObservedStatusChangeTime,omitempty"`
+	Drift                        *DriftStatus       `json:"drift,omitempty"`
+	LastCheckedTime              *metav1.Time       `json:"lastCheckedTime,omitempty"`
+	LastAppliedTime              *metav1.Time       `json:"lastAppliedTime,omitempty"`
 }
