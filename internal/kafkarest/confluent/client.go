@@ -6,6 +6,7 @@
 package confluent
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -15,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -378,12 +380,83 @@ func (c *Client) ListMirrors(ctx context.Context) ([]kafkarest.Mirror, error) {
 	return out, nil
 }
 
-// CreateMirror is implemented in a later task.
-func (c *Client) CreateMirror(ctx context.Context, r kafkarest.CreateMirrorRequest) error {
-	return errors.New("not implemented")
+type nameValue struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
-// AlterTopicConfigs is implemented in a later task.
+// sortedConfigs returns set as a deterministic name-sorted list.
+func sortedConfigs(set map[string]string) []nameValue {
+	out := make([]nameValue, 0, len(set))
+	for k, v := range set {
+		out = append(out, nameValue{Name: k, Value: v})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// post sends a JSON POST exactly once (never retried) and treats any 2xx as
+// success. The response body is discarded.
+func (c *Client) post(ctx context.Context, fullURL string, payload any) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("kafkarest: encode request: %w", err)
+	}
+	newReq := func(ctx context.Context) (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(data))
+		if err != nil {
+			return nil, fmt.Errorf("kafkarest: build request: %w", err)
+		}
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("Content-Type", "application/json")
+		c.applyAuth(req)
+		return req, nil
+	}
+	resp, err := httpretry.Do(ctx, c.http, newReq, false)
+	if err != nil {
+		return fmt.Errorf("kafkarest: request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("kafkarest: read response body: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return statusError(resp.StatusCode, body)
+	}
+	return nil
+}
+
+// CreateMirror creates a mirror topic on a link. replication_factor and
+// configs are omitted when not declared. Sent exactly once.
+func (c *Client) CreateMirror(ctx context.Context, r kafkarest.CreateMirrorRequest) error {
+	id, err := c.ClusterID(ctx)
+	if err != nil {
+		return err
+	}
+	body := struct {
+		SourceTopicName   string      `json:"source_topic_name"`
+		MirrorTopicName   string      `json:"mirror_topic_name"`
+		ReplicationFactor int         `json:"replication_factor,omitempty"`
+		Configs           []nameValue `json:"configs,omitempty"`
+	}{r.SourceTopicName, r.MirrorTopicName, r.ReplicationFactor, sortedConfigs(r.Configs)}
+	if err := c.post(ctx, c.baseURL+"/v3/clusters/"+esc(id)+"/links/"+esc(r.LinkName)+"/mirrors", body); err != nil {
+		return fmt.Errorf("kafkarest.CreateMirror: %w", err)
+	}
+	return nil
+}
+
+// AlterTopicConfigs sets the given topic configs. Sent exactly once.
 func (c *Client) AlterTopicConfigs(ctx context.Context, topic string, set map[string]string) error {
-	return errors.New("not implemented")
+	id, err := c.ClusterID(ctx)
+	if err != nil {
+		return err
+	}
+	body := struct {
+		Data []nameValue `json:"data"`
+	}{sortedConfigs(set)}
+	if err := c.post(ctx, c.baseURL+"/v3/clusters/"+esc(id)+"/topics/"+esc(topic)+"/configs:alter", body); err != nil {
+		return fmt.Errorf("kafkarest.AlterTopicConfigs: %w", err)
+	}
+	return nil
 }

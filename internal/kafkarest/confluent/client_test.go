@@ -325,13 +325,3 @@ func TestPathEscaping(t *testing.T) {
 		t.Fatalf("raw path = %q", raw)
 	}
 }
-
-func TestWriteStubsNotImplemented(t *testing.T) {
-	c := mustNew(t, "http://x", "c1", nil)
-	if err := c.CreateMirror(t.Context(), kafkarest.CreateMirrorRequest{}); err == nil {
-		t.Fatal("expected error")
-	}
-	if err := c.AlterTopicConfigs(t.Context(), "t", nil); err == nil {
-		t.Fatal("expected error")
-	}
-}
