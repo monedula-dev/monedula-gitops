@@ -68,7 +68,7 @@ func TestMirrorExecutableTaxonomy(t *testing.T) {
 
 func TestNonExecutableActionsHaveNoRisk(t *testing.T) {
 	for _, a := range []Action{
-		MirrorTopicUnhealthy, MirrorTopicStopping, MirrorTopicPromoted,
+		MirrorTopicUnhealthy, MirrorTopicStopping, MirrorTopicPromoted, MirrorTopicStalled,
 		MirrorTopicProgressing, UnsupportedReplicationFactorChange, StateReadError,
 	} {
 		require.Equal(t, RiskNone, RiskOf(a), a)
@@ -82,7 +82,7 @@ func TestNonExecutableActionsHaveNoRisk(t *testing.T) {
 func TestInformationalAndOperationalError(t *testing.T) {
 	all := []Action{
 		CreateMirrorTopic, UpdateMirrorTopicConfig, MirrorTopicUnhealthy, MirrorTopicStopping,
-		MirrorTopicPromoted, MirrorTopicProgressing, UnsupportedReplicationFactorChange,
+		MirrorTopicPromoted, MirrorTopicStalled, MirrorTopicProgressing, UnsupportedReplicationFactorChange,
 		StateReadError, Rejected, CreateTopic,
 	}
 	for _, a := range all {

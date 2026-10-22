@@ -1,0 +1,40 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: sample-cluster-rest
+  namespace: monedula-system
+spec:
+  bootstrapServers: kafka-bootstrap.kafka.svc:9093
+  tls:
+    enabled: true
+  auth:
+    mechanism: SCRAM-SHA-512
+    scram:
+      username:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-admin-credentials
+            key: username
+      password:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-admin-credentials
+            key: password
+  # rest enables Kafka REST (v3) access, required by KafkaMirrorTopic and used to
+  # detect mirror topics for KafkaTopic. endpoint is the base URL without /v3.
+  rest:
+    endpoint: https://kafka-rest.kafka.svc:8082
+    auth:
+      type: basic
+      username:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-rest-credentials
+            key: username
+      password:
+        valueFrom:
+          secretKeyRef:
+            name: kafka-rest-credentials
+            key: password
+    # clusterId is optional; when set it must equal the Kafka cluster ID.
+    # clusterId: lkc-abc123

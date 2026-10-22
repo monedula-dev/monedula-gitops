@@ -42,7 +42,7 @@ func callsContain(calls []string, prefix string) bool {
 func TestReconcileTopicPruneDisabledByDefault(t *testing.T) {
 	tp, k := pruneTopicFixture(false)
 
-	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unconsented prune must not be a retryable failure: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestReconcileTopicPruneDisabledByDefault(t *testing.T) {
 func TestReconcileTopicPruneEnabledDeletes(t *testing.T) {
 	tp, k := pruneTopicFixture(true)
 
-	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error on consenting prune: %v", err)
 	}

@@ -111,6 +111,20 @@ var (
 		Help: "Number of KafkaUsers currently managed by the operator.",
 	})
 
+	// mirrorTopicDrift is 1 when a KafkaMirrorTopic has detected drift (its
+	// status.drift.detected), 0 otherwise.
+	mirrorTopicDrift = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "monedula_kafka_mirrortopic_drift_detected",
+		Help: "Whether drift was detected for a KafkaMirrorTopic (1) or not (0), by namespace and name.",
+	}, []string{"namespace", "name"})
+
+	// managedMirrorTopics is the number of KafkaMirrorTopics currently observed
+	// by the operator.
+	managedMirrorTopics = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "monedula_managed_mirrortopics",
+		Help: "Number of KafkaMirrorTopics currently managed by the operator.",
+	})
+
 	// reconcileTerminalTotal counts TERMINAL reconcile outcomes (spec §16's
 	// "nil error, needs a human/spec change" class: ValidationFailed,
 	// TenancyDenied, ACLConflict-as-ValidationFailed, DuplicateIdentity,
@@ -141,6 +155,8 @@ func init() {
 		managedRoleBindings,
 		userDrift,
 		managedUsers,
+		mirrorTopicDrift,
+		managedMirrorTopics,
 		reconcileTerminalTotal,
 	)
 }
@@ -260,6 +276,24 @@ func DeleteUserDrift(namespace, name string) {
 // finalized/gone, so the gauge tracks the live count.
 func IncManagedUsers(delta float64) {
 	managedUsers.Add(delta)
+}
+
+// SetMirrorTopicDrift sets the drift gauge for a KafkaMirrorTopic.
+func SetMirrorTopicDrift(namespace, name string, drifted bool) {
+	mirrorTopicDrift.WithLabelValues(namespace, name).Set(boolToFloat(drifted))
+}
+
+// DeleteMirrorTopicDrift removes a deleted KafkaMirrorTopic's drift series so
+// CR churn does not accumulate stale series.
+func DeleteMirrorTopicDrift(namespace, name string) {
+	mirrorTopicDrift.DeleteLabelValues(namespace, name)
+}
+
+// IncManagedMirrorTopics adjusts the managed-mirror-topics gauge by delta: +1
+// the first time a given mirror is observed, -1 when it is gone, so the gauge
+// tracks the live count.
+func IncManagedMirrorTopics(delta float64) {
+	managedMirrorTopics.Add(delta)
 }
 
 // RecordReconcileTerminal bumps the terminal-outcome counter for kind+reason

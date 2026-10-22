@@ -18,6 +18,8 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/api/v1alpha1"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
 	kafkamock "github.com/monedula-dev/monedula-gitops/internal/kafka/mock"
+	"github.com/monedula-dev/monedula-gitops/internal/kafkarest"
+	restmock "github.com/monedula-dev/monedula-gitops/internal/kafkarest/mock"
 	srmock "github.com/monedula-dev/monedula-gitops/internal/schemaregistry/mock"
 )
 
@@ -1291,5 +1293,70 @@ func TestTopicRecordName_Delete_InlineBody_SubjectDeleted(t *testing.T) {
 	var topic v1alpha1.KafkaTopic
 	if err := cl.Get(context.Background(), topicReq().NamespacedName, &topic); err == nil {
 		t.Fatalf("topic should be gone (finalizer removed), finalizers %v", topic.Finalizers)
+	}
+}
+
+// TestTopicReconcile_RESTBuildFailed: a REST client build failure is a
+// ClientsBuildFailed error status, a backoff requeue and no Kafka mutation.
+func TestTopicReconcile_RESTBuildFailed(t *testing.T) {
+	s := topicScheme(t)
+	tp := topicObj("Enforce")
+	cl := newTopicFakeClient(t, s, tp, topicCluster())
+	k := kafkamock.New(nil, nil)
+	rec := events.NewFakeRecorder(8)
+	r := &KafkaTopicReconciler{Client: cl, Scheme: s, Recorder: rec,
+		Clients: stubFactory{k: k, restErr: errReason("rest down")}}
+
+	if _, err := r.Reconcile(context.Background(), topicReq()); err == nil {
+		t.Fatal("REST client build failure must return an error")
+	}
+	if calls := k.Calls(); len(calls) != 0 {
+		t.Fatalf("Kafka mutated on REST build failure: %v", calls)
+	}
+	var got v1alpha1.KafkaTopic
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(tp), &got); err != nil {
+		t.Fatalf("get back: %v", err)
+	}
+	if got.Status == nil {
+		t.Fatal("status not written")
+	}
+	var ready *metav1.Condition
+	for i := range got.Status.Conditions {
+		if got.Status.Conditions[i].Type == v1alpha1.CondReady {
+			ready = &got.Status.Conditions[i]
+		}
+	}
+	if ready == nil || ready.Status != metav1.ConditionFalse || ready.Reason != "ClientsBuildFailed" {
+		t.Fatalf("Ready = %+v, want False/ClientsBuildFailed", ready)
+	}
+	select {
+	case ev := <-rec.Events:
+		if !strings.Contains(ev, "Warning") || !strings.Contains(ev, "ClientsBuildFailed") {
+			t.Fatalf("event = %q, want Warning ClientsBuildFailed", ev)
+		}
+	default:
+		t.Fatal("no ClientsBuildFailed event recorded")
+	}
+}
+
+// TestTopicReconcile_PassesRESTToEngine: the REST client reaches the engine,
+// so a live mirror topic is not created or altered by KafkaTopic.
+func TestTopicReconcile_PassesRESTToEngine(t *testing.T) {
+	s := topicScheme(t)
+	tp := topicObj("Enforce")
+	tp.Spec.Config = map[string]string{"retention.ms": "5"}
+	cl := newTopicFakeClient(t, s, tp, topicCluster())
+	k := kafkamock.New(seededTopics("payments.orders"), nil)
+	k.SetClusterID("lkc-1")
+	rc := restmock.New("lkc-1")
+	rc.AddMirror(kafkarest.Mirror{LinkName: "l", MirrorTopicName: "payments.orders", Status: "ACTIVE"})
+	r := &KafkaTopicReconciler{Client: cl, Scheme: s, Recorder: events.NewFakeRecorder(8),
+		Clients: stubFactory{k: k, rest: rc}}
+
+	if _, err := r.Reconcile(context.Background(), topicReq()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if calls := k.Calls(); len(calls) != 0 {
+		t.Fatalf("live mirror topic mutated: %v", calls)
 	}
 }

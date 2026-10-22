@@ -72,6 +72,7 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/executor"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
 	"github.com/monedula-dev/monedula-gitops/internal/mds"
+	"github.com/monedula-dev/monedula-gitops/internal/mirror"
 	"github.com/monedula-dev/monedula-gitops/internal/operations"
 	"github.com/monedula-dev/monedula-gitops/internal/operator"
 	"github.com/monedula-dev/monedula-gitops/internal/schemaregistry"
@@ -130,6 +131,11 @@ const (
 	// reasonSchemaRegistryOK is set on CondSchemaRegistryDegraded=False when the
 	// fetch succeeded (schemas are in play and the global level was read).
 	reasonSchemaRegistryOK = "GlobalCompatibilityRead"
+	// reasonRESTNotConfigured is set on ValidationFailed=True when a
+	// KafkaMirrorTopic references a KafkaCluster without spec.rest. TERMINAL:
+	// mirror state cannot be read or written until the cluster declares a
+	// Kafka REST endpoint (the cluster watch re-triggers the reconcile).
+	reasonRESTNotConfigured = "RESTNotConfigured"
 )
 
 // Kind label values for monedula_reconcile_terminal_total (v0.36 Task 7).
@@ -145,6 +151,7 @@ const (
 	kindKafkaQuota        = "kafkaquota"
 	kindKafkaRoleBinding  = "kafkarolebinding"
 	kindKafkaUser         = "kafkauser"
+	kindKafkaMirrorTopic  = "kafkamirrortopic"
 )
 
 // Subject names follow spec.schema.subjectStrategy (spec §11) and are computed
@@ -247,9 +254,20 @@ func BuildClusterACLView(topics []*v1alpha1.KafkaTopic, policies []*v1alpha1.Kaf
 // view, when non-nil, is the cluster-wide aggregated desired ACL set + scope
 // (spec §20.1); it governs prune computation only — see ClusterACLView. A nil
 // view keeps the per-resource (CLI single-resource) prune semantics.
+//
+// mirrors, when non-nil (the cluster has spec.rest), enables the mirror guard:
+// it is the caller's mirror snapshot for this topic (mirror.ReadTopicSnapshot,
+// read before any substrate lock is taken). For a live or stopping mirror topic
+// the diff replaces the topic's create/config/partition/RF ops with one
+// Rejected finding and drops its schema ops and its CreateAcl and DeleteAcl
+// (prune) ops on the literal topic resource; prefixed/wildcard and non-topic
+// ACLs are kept. The RBAC role-binding step is skipped for that topic.
+// Unreadable mirror state fails closed in every mode (StateReadError: not
+// Ready, non-nil error, nothing applied). A nil mirrors keeps the legacy
+// behavior unchanged.
 func ReconcileTopic(ctx context.Context, topic *v1alpha1.KafkaTopic, cluster *v1alpha1.KafkaCluster,
 	k kafka.AdminClient, sr schemaregistry.Client, r secrets.Resolver, view *ClusterACLView,
-	mdsClient mds.Client, rbView *ClusterRoleBindingView) (v1alpha1.KafkaTopicStatus, error) {
+	mdsClient mds.Client, rbView *ClusterRoleBindingView, mirrors *mirror.Snapshot) (v1alpha1.KafkaTopicStatus, error) {
 
 	now := metav1.Now()
 	st := v1alpha1.KafkaTopicStatus{ObservedGeneration: topic.Generation, LastCheckedTime: &now}
@@ -387,6 +405,10 @@ func ReconcileTopic(ctx context.Context, topic *v1alpha1.KafkaTopic, cluster *v1
 	// classification.
 	globalCompatibilityErr := live.GlobalCompatibilityErr
 
+	// Mirror guard: only clusters with Kafka REST carry a mirror snapshot. It
+	// is not re-read after apply; the guard decision is per pass.
+	live.Mirrors = mirrors
+
 	d := diff.Desired{
 		Topics:  []diff.DesiredTopic{desiredTopic},
 		ACLs:    desiredACLs,
@@ -400,6 +422,24 @@ func ReconcileTopic(ctx context.Context, topic *v1alpha1.KafkaTopic, cluster *v1
 		d.SetPruneAggregate(view.DesiredACLs, view.Scope)
 	}
 	ops := diff.Compute(d, live)
+
+	// Unreadable mirror state fails closed in every mode (ObserveOnly does not
+	// hide operational errors): not Ready, nothing applied, backoff requeue.
+	if msg := operationalErrorMsg(ops); msg != "" {
+		st.Phase = v1alpha1.PhaseError
+		setCond(&st.Conditions, v1alpha1.CondReady, metav1.ConditionFalse, reasonLiveStateError, msg, topic.Generation)
+		return st, errors.New(msg)
+	}
+	// A live or stopping mirror topic is owned by KafkaMirrorTopic: the diff
+	// already replaced its ops with a Rejected finding; access-derived role
+	// bindings for it are skipped below as well.
+	guardedMirror := false
+	if live.Mirrors != nil {
+		switch live.Mirrors.Classify(topicName) {
+		case mirror.Mirror, mirror.StoppingMirror:
+			guardedMirror = true
+		}
+	}
 
 	mode := topic.Spec.Reconciliation.Mode
 
@@ -472,6 +512,11 @@ func ReconcileTopic(ctx context.Context, topic *v1alpha1.KafkaTopic, cluster *v1
 	setACLConflictCondition(&st.Conditions, view, "KafkaTopic", topic.Namespace, topic.Name, topic.Generation)
 
 	// Topic-access → RBAC role bindings (spec §40), only on rbac-backed clusters.
+	// A guarded mirror topic gets no access-derived mutation; prior RBAC
+	// conditions are left as they were.
+	if guardedMirror {
+		return st, retryErr
+	}
 	if v1alpha1.HasAccessBackend(cluster, "rbac") {
 		if cluster.Spec.Authorization == nil || cluster.Spec.Authorization.MDS == nil {
 			msg := "accessBackends includes \"rbac\" but cluster has no authorization.mds configured"
@@ -1044,6 +1089,10 @@ type driftTarget struct {
 }
 
 func topicTarget(st *v1alpha1.KafkaTopicStatus) driftTarget {
+	return driftTarget{conds: &st.Conditions, drift: &st.Drift, setPhase: func(p string) { st.Phase = p }}
+}
+
+func mirrorTarget(st *v1alpha1.KafkaMirrorTopicStatus) driftTarget {
 	return driftTarget{conds: &st.Conditions, drift: &st.Drift, setPhase: func(p string) { st.Phase = p }}
 }
 

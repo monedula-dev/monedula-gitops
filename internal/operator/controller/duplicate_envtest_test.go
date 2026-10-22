@@ -419,3 +419,178 @@ func TestEnvtestQuotaDuplicateLoserDeletionOrphansQuota(t *testing.T) {
 		t.Fatalf("mock quotas = %+v, want deleted once no claimant remains", quotas)
 	}
 }
+
+// TestEnvtestTopicLosesToOlderMirror pins the cross-kind claim: a
+// KafkaMirrorTopic created FIRST owns the destination topic identity, so a
+// later KafkaTopic resolving to the same (cluster, topic) goes terminal
+// DuplicateIdentity naming the mirror, without touching the broker. No mirror
+// reconciler runs here; the mirror CR's existence is the claim.
+func TestEnvtestTopicLosesToOlderMirror(t *testing.T) {
+	env := startEnv(t)
+	defer env.stop()
+	ctx := context.Background()
+
+	if err := env.cl.Create(ctx, newCluster(testNamespace, "xk-cluster")); err != nil {
+		t.Fatalf("create cluster: %v", err)
+	}
+	// "xk-a" < "xk-b" so the mirror also wins an equal-second tiebreak.
+	mirror := &v1alpha1.KafkaMirrorTopic{
+		ObjectMeta: metav1.ObjectMeta{Name: "xk-a", Namespace: testNamespace},
+		Spec: v1alpha1.KafkaMirrorTopicSpec{
+			ClusterRef:      v1alpha1.ClusterRef{Name: "xk-cluster"},
+			LinkName:        "prod-to-dr",
+			SourceTopicName: "xk.orders",
+		},
+	}
+	if err := env.cl.Create(ctx, mirror); err != nil {
+		t.Fatalf("create mirror: %v", err)
+	}
+	topic := &v1alpha1.KafkaTopic{
+		ObjectMeta: metav1.ObjectMeta{Name: "xk-b", Namespace: testNamespace},
+		Spec: v1alpha1.KafkaTopicSpec{
+			ClusterRef: v1alpha1.ClusterRef{Name: "xk-cluster"},
+			TopicName:  "xk.orders",
+			Partitions: 3,
+		},
+	}
+	if err := env.cl.Create(ctx, topic); err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+
+	mk := kafkamock.New(nil, nil)
+	apiReader, err := client.New(env.cfg, client.Options{Scheme: env.scheme})
+	if err != nil {
+		t.Fatalf("building quorum reader: %v", err)
+	}
+	r := &KafkaTopicReconciler{
+		Client:    env.cl,
+		Scheme:    env.scheme,
+		Clients:   stubFactory{k: mk, sr: schemamock.New()},
+		APIReader: apiReader,
+	}
+	reconcileFor(t, r, testNamespace, "xk-b")
+	if calls := mk.Calls(); len(calls) != 0 {
+		t.Fatalf("the losing topic must not touch the broker; kafka calls = %v", calls)
+	}
+	var got v1alpha1.KafkaTopic
+	if err := env.cl.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: "xk-b"}, &got); err != nil {
+		t.Fatalf("re-get topic: %v", err)
+	}
+	if got.Status == nil || got.Status.Phase != v1alpha1.PhaseError {
+		t.Fatalf("topic status = %+v, want phase Error", got.Status)
+	}
+	var vf *metav1.Condition
+	for i := range got.Status.Conditions {
+		if got.Status.Conditions[i].Type == v1alpha1.CondValidationFailed {
+			vf = &got.Status.Conditions[i]
+		}
+	}
+	if vf == nil || vf.Status != metav1.ConditionTrue || vf.Reason != "DuplicateIdentity" {
+		t.Fatalf("ValidationFailed = %+v, want True/DuplicateIdentity", vf)
+	}
+	if !strings.Contains(vf.Message, "KafkaMirrorTopic "+testNamespace+"/xk-a") {
+		t.Fatalf("loser message must name the mirror winner: %q", vf.Message)
+	}
+}
+
+// TestEnvtestGlobalClusterCrossNamespace pins the global-cluster scope: with
+// ClusterNamespace set, clusterRef resolves in that namespace for every CR, so
+// a KafkaTopic in namespace a and a KafkaMirrorTopic in namespace b naming the
+// same cluster and topic contest ONE identity, and exactly one of them wins.
+// The mirror is created first and wins; the topic goes terminal.
+func TestEnvtestGlobalClusterCrossNamespace(t *testing.T) {
+	env := startEnv(t)
+	defer env.stop()
+	ctx := context.Background()
+
+	for _, ns := range []string{"infra", "a", "b"} {
+		if err := env.cl.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
+			t.Fatalf("create namespace %s: %v", ns, err)
+		}
+	}
+	if err := env.cl.Create(ctx, newCluster("infra", "shared")); err != nil {
+		t.Fatalf("create cluster: %v", err)
+	}
+	if err := env.cl.Create(ctx, &v1alpha1.KafkaMirrorTopic{
+		ObjectMeta: metav1.ObjectMeta{Name: "m", Namespace: "b"},
+		Spec: v1alpha1.KafkaMirrorTopicSpec{
+			ClusterRef:      v1alpha1.ClusterRef{Name: "shared"},
+			LinkName:        "prod-to-dr",
+			SourceTopicName: "src.orders",
+			TopicName:       "global.orders",
+		},
+	}); err != nil {
+		t.Fatalf("create mirror: %v", err)
+	}
+	// "a/t" < "b/m": on an equal-second timestamp the TOPIC would win the
+	// tiebreak, so determine the expected winner from the stored objects
+	// rather than creation order.
+	if err := env.cl.Create(ctx, &v1alpha1.KafkaTopic{
+		ObjectMeta: metav1.ObjectMeta{Name: "t", Namespace: "a"},
+		Spec: v1alpha1.KafkaTopicSpec{
+			ClusterRef: v1alpha1.ClusterRef{Name: "shared"},
+			TopicName:  "global.orders",
+			Partitions: 3,
+		},
+	}); err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+	var storedTopic v1alpha1.KafkaTopic
+	if err := env.cl.Get(ctx, types.NamespacedName{Namespace: "a", Name: "t"}, &storedTopic); err != nil {
+		t.Fatalf("get topic: %v", err)
+	}
+	var storedMirror v1alpha1.KafkaMirrorTopic
+	if err := env.cl.Get(ctx, types.NamespacedName{Namespace: "b", Name: "m"}, &storedMirror); err != nil {
+		t.Fatalf("get mirror: %v", err)
+	}
+	topicWins := olderTopicClaim(&storedTopic, &storedMirror)
+
+	mk := kafkamock.New(nil, nil)
+	r := &KafkaTopicReconciler{
+		Client:           env.cl,
+		Scheme:           env.scheme,
+		Clients:          stubFactory{k: mk, sr: schemamock.New()},
+		ClusterNamespace: "infra",
+	}
+	reconcileFor(t, r, "a", "t")
+	if err := env.cl.Get(ctx, types.NamespacedName{Namespace: "a", Name: "t"}, &storedTopic); err != nil {
+		t.Fatalf("re-get topic: %v", err)
+	}
+	if storedTopic.Status == nil {
+		t.Fatal("topic has no status after reconcile")
+	}
+	vfTrue := condStatus(storedTopic.Status.Conditions, v1alpha1.CondValidationFailed) == metav1.ConditionTrue
+	// Exactly one winner: the mirror (whose reconciler does not run here) sees
+	// the topic as its older claimant exactly when the topic wins.
+	mirrorRival, err := findOlderTopicClaimant(ctx, env.cl, &storedMirror, false)
+	if err != nil {
+		t.Fatalf("mirror claim scan: %v", err)
+	}
+	if (mirrorRival != nil) != topicWins {
+		t.Fatalf("mirror older claimant = %v, topicWins = %v: want exactly one winner", mirrorRival, topicWins)
+	}
+	if topicWins {
+		if storedTopic.Status.Phase != v1alpha1.PhaseReady || vfTrue {
+			t.Fatalf("topic is the older claimant and must reconcile; status = %+v", storedTopic.Status)
+		}
+		if !containsCall(mk.Calls(), "CreateTopic global.orders") {
+			t.Fatalf("winning topic must create the topic; kafka calls = %v", mk.Calls())
+		}
+		return
+	}
+	if storedTopic.Status.Phase != v1alpha1.PhaseError || !vfTrue {
+		t.Fatalf("topic must lose to the older cross-namespace mirror; status = %+v", storedTopic.Status)
+	}
+	if len(mk.Calls()) != 0 {
+		t.Fatalf("losing topic touched the broker: %v", mk.Calls())
+	}
+	var vfMsg string
+	for _, c := range storedTopic.Status.Conditions {
+		if c.Type == v1alpha1.CondValidationFailed {
+			vfMsg = c.Message
+		}
+	}
+	if !strings.Contains(vfMsg, "KafkaMirrorTopic b/m") {
+		t.Fatalf("loser message must name the mirror in namespace b: %q", vfMsg)
+	}
+}

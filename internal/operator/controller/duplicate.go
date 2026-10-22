@@ -1,6 +1,7 @@
 // Duplicate-identity gate (v0.36): the reconciler-side, eventually-consistent
 // backstop for broker-identity uniqueness across the four kinds that own a
-// single broker identity — KafkaTopic (cluster, topicName), KafkaQuota
+// single broker identity — KafkaTopic (cluster, topicName; shared with
+// KafkaMirrorTopic, see topicclaim.go), KafkaQuota
 // (cluster, entity), KafkaUser (cluster, username), and KafkaRoleBinding (the
 // compiled MDS binding identity set). KafkaAccessPolicy is deliberately
 // excluded: a policy has no single broker identity (its ACL tuples are
@@ -194,44 +195,9 @@ func identityMaterialized(conds []metav1.Condition) bool {
 
 // --- KafkaTopic ---
 
-// findOlderTopicClaim returns the OLDER live KafkaTopic claiming the same
-// (cluster, topicName) identity as topic, or nil when topic is the oldest
-// claimant (or unique). namespaceLocal follows the operator convention: with
-// no --cluster-namespace override, clusterRef is namespace-local, so only
-// same-namespace CRs can contest the identity (the same scope the webhook's
-// clusterNamespaceFor comparison implements). c is a plain client.Reader (like
-// every finder in this file) so the same scan runs against either the cached
-// client or the quorum APIReader; the in-process clusterRef filtering (see the
-// scan-scope note) needs no field indexes, which the APIReader lacks anyway.
-func findOlderTopicClaim(ctx context.Context, c client.Reader, topic *v1alpha1.KafkaTopic, namespaceLocal bool) (*v1alpha1.KafkaTopic, error) {
-	var listOpts []client.ListOption
-	if namespaceLocal {
-		listOpts = append(listOpts, client.InNamespace(topic.Namespace))
-	}
-	var list v1alpha1.KafkaTopicList
-	if err := c.List(ctx, &list, listOpts...); err != nil {
-		return nil, fmt.Errorf("listing KafkaTopics for duplicate-identity check: %w", err)
-	}
-	want := operatorwebhook.ResolvedTopicName(topic)
-	var rivals []client.Object
-	for i := range list.Items {
-		other := &list.Items[i]
-		if other.UID == topic.UID || !other.DeletionTimestamp.IsZero() {
-			continue // self, or a deleting CR (never blocks others)
-		}
-		if other.Spec.ClusterRef.Name != topic.Spec.ClusterRef.Name {
-			continue
-		}
-		if operatorwebhook.ResolvedTopicName(other) != want {
-			continue
-		}
-		rivals = append(rivals, other)
-	}
-	if w := oldestRival(topic, rivals); w != nil {
-		return w.(*v1alpha1.KafkaTopic), nil
-	}
-	return nil, nil
-}
+// The KafkaTopic gate scans BOTH topic-claiming kinds: a KafkaMirrorTopic with
+// the same effective destination topic on the same cluster contests the same
+// identity (topicclaim.go: findOlderTopicClaimant, olderTopicClaim).
 
 // duplicateIdentityGate is the KafkaTopic call site of the duplicate-identity
 // check. It returns done=true when the reconcile is finished here — either
@@ -240,7 +206,7 @@ func findOlderTopicClaim(ctx context.Context, c client.Reader, topic *v1alpha1.K
 // done=false means no older claimant: proceed with the normal reconcile.
 // MUST only be called on the non-deletion path (see the package doc).
 func (r *KafkaTopicReconciler) duplicateIdentityGate(ctx context.Context, topic *v1alpha1.KafkaTopic) (ctrl.Result, bool, error) {
-	winner, derr := findOlderTopicClaim(ctx, r.Client, topic, r.ClusterNamespace == "")
+	winner, derr := findOlderTopicClaimant(ctx, r.Client, topic, r.ClusterNamespace == "")
 	// Quorum recheck on the contested paths only (see the package doc): a
 	// cached rival (loser path) or a CR that cannot prove a past successful
 	// reconcile (never-materialized path) re-runs the same scan uncached and
@@ -248,7 +214,7 @@ func (r *KafkaTopicReconciler) duplicateIdentityGate(ctx context.Context, topic 
 	// rival — the steady-state hot path — never reach the APIReader.
 	if derr == nil && r.APIReader != nil &&
 		(winner != nil || topic.Status == nil || !identityMaterialized(topic.Status.Conditions)) {
-		winner, derr = findOlderTopicClaim(ctx, r.APIReader, topic, r.ClusterNamespace == "")
+		winner, derr = findOlderTopicClaimant(ctx, r.APIReader, topic, r.ClusterNamespace == "")
 	}
 	if derr != nil {
 		r.event(topic, corev1.EventTypeWarning, reasonDuplicateCheckFailed, derr.Error())
@@ -265,7 +231,7 @@ func (r *KafkaTopicReconciler) duplicateIdentityGate(ctx context.Context, topic 
 	}
 	msg := duplicateIdentityMessage(
 		fmt.Sprintf("(cluster %q, topic %q)", topic.Spec.ClusterRef.Name, operatorwebhook.ResolvedTopicName(topic)),
-		"KafkaTopic", winner.Namespace, winner.Name)
+		topicClaimKind(winner), winner.GetNamespace(), winner.GetName())
 	r.event(topic, corev1.EventTypeWarning, reasonDuplicateIdentity, msg)
 	operator.RecordReconcileTerminal(controllerKafkaTopic, reasonDuplicateIdentity)
 	// The loser's drift is not evaluated (the engine never runs), so clear the
@@ -590,7 +556,10 @@ func (r *KafkaRoleBindingReconciler) duplicateIdentityGate(ctx context.Context, 
 // KafkaUser or KafkaQuota skips its broker-side cleanup because another live
 // (non-deleting) same-kind CR still claims the same broker identity: the
 // finalizer is removed, but the credential/quota is orphaned to the surviving
-// claimant, which keeps managing it.
+// claimant, which keeps managing it. A deleting Delete-policy KafkaTopic uses
+// it too (as a Warning) when another live KafkaTopic or KafkaMirrorTopic
+// claims the same topic: the topic, its ACLs and schema subjects are left in
+// place (see KafkaTopicReconciler.handleDeletion).
 const reasonOrphanedToCoClaimant = "OrphanedToCoClaimant"
 
 // findLiveUserCoClaimant returns another live (non-deleting) KafkaUser

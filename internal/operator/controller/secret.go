@@ -30,7 +30,7 @@ const ClusterSecretNamesIndex = "spec.secretRefs"
 // (clientId/clientSecret/tokenEndpointCA — the IdP's own trust domain,
 // distinct from tls.caCert), schemaRegistry (auth username/password +
 // schemaRegistry.tls), and authorization.mds (auth username/password/token +
-// mds.tls). Only secretKeyRef sources count — inline/env/configMapKeyRef
+// mds.tls), and rest (auth username/password/token + rest.tls). Only secretKeyRef sources count — inline/env/configMapKeyRef
 // reference no Secret. Empty when the cluster references no Secret. Safe on a
 // nil cluster.
 func clusterSecretNames(c *v1alpha1.KafkaCluster) []string {
@@ -106,6 +106,15 @@ func clusterSecretNames(c *v1alpha1.KafkaCluster) []string {
 			addVF(mds.Auth.Token)
 		}
 		addTLS(mds.TLS)
+	}
+
+	if c.Spec.REST != nil {
+		if a := c.Spec.REST.Auth; a != nil {
+			addVF(a.Username)
+			addVF(a.Password)
+			addVF(a.Token)
+		}
+		addTLS(c.Spec.REST.TLS)
 	}
 
 	return out

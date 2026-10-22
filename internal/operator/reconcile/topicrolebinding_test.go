@@ -93,7 +93,7 @@ func TestReconcileTopicEmitsRoleBindingsOnRBACBackend(t *testing.T) {
 	mock := mdsmock.New() // empty live state → AddRoleBinding expected
 
 	rbv := rbViewFor(tp, cl.Spec.Authorization.MDS)
-	st, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, mock, rbv)
+	st, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, mock, rbv, nil)
 	if err != nil {
 		t.Fatalf("unexpected transient error: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestReconcileTopicSkipsMDSOnACLBackend(t *testing.T) {
 	k := kafkamock.New(nil, nil)
 	mock := mdsmock.New()
 
-	_, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, mock, nil)
+	_, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, mock, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected transient error: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestReconcileTopicSetsRBACCoarsenedCondition(t *testing.T) {
 	k := kafkamock.New(nil, nil)
 	mock := mdsmock.New()
 
-	st, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, mock, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, mock, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected transient error: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestReconcileTopicRBACWithoutMDSIsTerminal(t *testing.T) {
 	k := kafkamock.New(nil, nil)
 	mock := mdsmock.New()
 
-	st, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, mock, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, mock, nil, nil)
 	if err != nil {
 		t.Fatalf("nil-MDS guard returns terminal (nil error); got: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestReconcileTopicRBACListErrorIsTransient(t *testing.T) {
 	failMock := &failListMDSClient{err: listErr}
 
 	rbv := rbViewFor(tp, cl.Spec.Authorization.MDS)
-	st, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, failMock, rbv)
+	st, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, failMock, rbv, nil)
 	if err == nil {
 		t.Fatalf("ListRoleBindings failure must be transient (non-nil error)")
 	}
