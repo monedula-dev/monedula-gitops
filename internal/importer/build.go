@@ -425,7 +425,15 @@ func buildMirrors(snap Snapshot, clusterName string, nameOwner map[string]bool, 
 			rf := ms.ReplicationFactor
 			m.Spec.ReplicationFactor = &rf
 		}
-		if n := len(ms.ExplicitConfigKeys); n > 0 {
+		link := mirror.LinkInfo{Configs: snap.MirrorLinks[ms.LinkName].Configs}
+		n := 0
+		for _, key := range ms.ExplicitConfigKeys {
+			if managed, known := mirror.LinkManaged(link, key); managed && known {
+				continue
+			}
+			n++
+		}
+		if n > 0 {
 			*warnings = append(*warnings, fmt.Sprintf(
 				"%s: mirror topic %q has %d explicitly set configs; declare reviewed local keys manually",
 				codeMirrorConfigNotImported, ms.Name, n))

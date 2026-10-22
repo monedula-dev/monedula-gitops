@@ -56,6 +56,7 @@ CI runs the adapter integration tests against every cell below on each pull requ
 | `cp-8.0` | `confluentinc/cp-kafka:8.0.7` | `confluentinc/cp-schema-registry:8.0.7` | integration | topics, acls, quotas, scram, schemaregistry |
 | `cp-8.3` | `confluentinc/cp-kafka:8.3.1` | `confluentinc/cp-schema-registry:8.3.1` | integration, e2e | topics, acls, quotas, scram, schemaregistry |
 | `cp-7.6-mds` | `confluentinc/cp-server:7.6.13` | `—` | e2e | topics, acls, quotas, scram, mds |
+| `cp-8.3-link` | `confluentinc/cp-server:8.3.1` | `—` | e2e | topics, acls, cluster-linking |
 <!-- END GENERATED: version-matrix -->
 
 `make matrix-docs` generates this table from [`internal/matrix/versions.yaml`](internal/matrix/versions.yaml), and CI fails if it is stale.

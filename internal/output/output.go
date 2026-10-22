@@ -101,17 +101,18 @@ func Render(ops []operations.Operation, format, cluster, kind string) ([]byte, e
 // fully-qualified topic name, which is the identity that matters for an applied result.
 // Mode mirrors Change.Mode: set only for non-Enforce operations (spec §16).
 type ResultEntry struct {
-	Action operations.Action `json:"action"`
-	Kind   string            `json:"kind,omitempty"`
-	Name   string            `json:"name,omitempty"`
-	Target string            `json:"target,omitempty"`
-	Field  string            `json:"field,omitempty"`
-	From   string            `json:"from,omitempty"`
-	To     string            `json:"to,omitempty"`
-	Mode   string            `json:"mode,omitempty"`
-	Risk   operations.Risk   `json:"risk,omitempty"`
-	Status executor.Status   `json:"status"`
-	Error  string            `json:"error,omitempty"`
+	Action  operations.Action `json:"action"`
+	Kind    string            `json:"kind,omitempty"`
+	Name    string            `json:"name,omitempty"`
+	Target  string            `json:"target,omitempty"`
+	Field   string            `json:"field,omitempty"`
+	From    string            `json:"from,omitempty"`
+	To      string            `json:"to,omitempty"`
+	Mode    string            `json:"mode,omitempty"`
+	Risk    operations.Risk   `json:"risk,omitempty"`
+	Status  executor.Status   `json:"status"`
+	Message string            `json:"message,omitempty"`
+	Error   string            `json:"error,omitempty"`
 }
 
 // ResultDocument is the ApplyResult shape used for yaml/json. summary maps each
@@ -131,7 +132,7 @@ func toResultDocument(res executor.Result, cluster string) ResultDocument {
 			Action: o.Action, Kind: o.Kind, Name: o.Name, Target: o.Target,
 			Field: o.Field, From: o.From, To: o.To,
 			Mode: renderedMode(o.Mode), Risk: o.Risk,
-			Status: r.Status, Error: r.Err,
+			Status: r.Status, Message: o.Message, Error: r.Err,
 		})
 	}
 	summary := make(map[executor.Status]int)
@@ -153,14 +154,23 @@ func renderApplyResultHuman(res executor.Result, cluster string) []byte {
 	fmt.Fprintf(&buf, "Cluster: %s\n", cluster)
 	for _, r := range res.Results {
 		o := r.Op
-		fmt.Fprintf(&buf, "%s %s %s/%s %s", r.Status, o.Action, o.Kind, o.Name, o.Target)
+		if string(r.Status) == string(o.Action) {
+			fmt.Fprintf(&buf, "%s %s/%s %s", r.Status, o.Kind, o.Name, o.Target)
+		} else {
+			fmt.Fprintf(&buf, "%s %s %s/%s %s", r.Status, o.Action, o.Kind, o.Name, o.Target)
+		}
 		if o.Field != "" {
 			fmt.Fprintf(&buf, " [field=%s %s -> %s]", o.Field, o.From, o.To)
 		}
-		fmt.Fprintf(&buf, " (risk=%s)", o.Risk)
+		if o.Risk != "" {
+			fmt.Fprintf(&buf, " (risk=%s)", o.Risk)
+		}
 		rotateAnnotation(&buf, o)
 		if m := renderedMode(o.Mode); m != "" {
 			fmt.Fprintf(&buf, " (mode=%s, report-only)", m)
+		}
+		if o.Message != "" {
+			fmt.Fprintf(&buf, " message=%s", o.Message)
 		}
 		if r.Err != "" {
 			fmt.Fprintf(&buf, " error=%s", r.Err)

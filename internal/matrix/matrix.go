@@ -42,6 +42,7 @@ const (
 	CapSCRAM          = "scram"
 	CapSchemaRegistry = "schemaregistry"
 	CapMDS            = "mds"
+	CapClusterLinking = "cluster-linking"
 )
 
 // EnvCell names the environment variable that selects a cell by id. Unset (or

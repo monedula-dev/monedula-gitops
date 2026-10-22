@@ -1,0 +1,57 @@
+steps:
+  # Preflight: Kafka REST is reachable and bound to the dest cluster, and the
+  # src-to-dest link is visible.
+  - run: doctor
+    expect:
+      exitCode: 0
+      outputContains: ["link:src-to-dest"]
+  - run: apply
+    expect: { exitCode: 0, outputContains: ["CreateMirrorTopic"] }
+  - run: verify
+    expect: { exitCode: 0 }
+  # Produce on the source cluster ...
+  - run: exec
+    exec:
+      service: source
+      command: ["bash", "-c", "printf 'm1\nm2\nm3\n' | kafka-console-producer --bootstrap-server source:9092 --topic orders"]
+    expect: { exitCode: 0 }
+  # ... and read the records back from the mirror on the destination cluster.
+  - run: exec
+    exec:
+      service: dest
+      command: ["kafka-console-consumer", "--bootstrap-server", "dest:9092", "--topic", "orders",
+                "--from-beginning", "--max-messages", "3", "--timeout-ms", "60000"]
+    expect: { exitCode: 0, outputContains: ["m1", "m2", "m3"] }
+  # Pause the mirror out of band: verify reports it unhealthy.
+  - run: exec
+    exec:
+      service: dest
+      command: ["kafka-mirrors", "--bootstrap-server", "dest:9092", "--pause", "--topics", "orders"]
+    expect: { exitCode: 0 }
+  - run: verify
+    expect: { exitCode: 1, outputContains: ["MirrorTopicUnhealthy", "PAUSED"] }
+  - run: exec
+    exec:
+      service: dest
+      command: ["kafka-mirrors", "--bootstrap-server", "dest:9092", "--unpause", "--topics", "orders"]
+    expect: { exitCode: 0 }
+  - run: verify
+    expect: { exitCode: 0 }
+  # A mirror whose destination name is an existing normal topic is rejected.
+  - run: apply
+    manifests: manifests-collision
+    expect: { exitCode: 2, outputContains: ["topic exists and is not a mirror"] }
+  # Import the live dest cluster and verify the imported manifests are clean.
+  - run: import
+    expect: { exitCode: 0 }
+  - run: verify
+    manifests: "@imported"
+    expect: { exitCode: 0 }
+liveState:
+  mirrors:
+    - name: orders
+      linkName: src-to-dest
+      sourceTopic: orders
+      status: ACTIVE
+  absent:
+    mirrors: [ledger]

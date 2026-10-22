@@ -243,3 +243,50 @@ liveState:
 		t.Errorf("subjects parsed wrong: %+v", e.LiveState.Subjects)
 	}
 }
+
+func TestLoadExpectExecStep(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "expect.yaml")
+	const doc = `
+steps:
+  - run: exec
+    exec: { service: dest, command: [echo, hi] }
+    expect: { exitCode: 0, outputContains: ["hi"] }
+`
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e, err := LoadExpect(path)
+	if err != nil {
+		t.Fatalf("LoadExpect: %v", err)
+	}
+	if len(e.Steps) != 1 {
+		t.Fatalf("want 1 step, got %d: %+v", len(e.Steps), e.Steps)
+	}
+	st := e.Steps[0]
+	if st.Run != "exec" || st.Exec == nil || st.Exec.Service != "dest" ||
+		len(st.Exec.Command) != 2 || st.Exec.Command[0] != "echo" || st.Exec.Command[1] != "hi" {
+		t.Errorf("exec step wrong: %+v (exec %+v)", st, st.Exec)
+	}
+	if st.Expect == nil || st.Expect.ExitCode == nil || *st.Expect.ExitCode != 0 {
+		t.Errorf("exec step expect wrong: %+v", st.Expect)
+	}
+}
+
+func TestLoadExpectExecStepRequiresService(t *testing.T) {
+	cases := map[string]string{
+		"missing service": "steps:\n  - run: exec\n    exec: { command: [echo, hi] }\n",
+		"missing command": "steps:\n  - run: exec\n    exec: { service: dest }\n",
+		"missing exec":    "steps:\n  - run: exec\n",
+	}
+	for name, doc := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "expect.yaml")
+			if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := LoadExpect(path); err == nil {
+				t.Fatal("expected a load error for an incomplete exec step")
+			}
+		})
+	}
+}

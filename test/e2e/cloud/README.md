@@ -55,6 +55,13 @@ It never runs in CI and never in the normal test suite: it is behind the
 5. **Service account** *(optional — enables the ACL subtest)* — create a
    service account and note its id (`sa-...`). It needs no permissions; it is
    only the *principal* the test grants ACLs to.
+6. **Cluster link + source topic** *(optional — enables the mirror subtest)* —
+   an existing cluster link on the test cluster **without a link prefix**, and
+   one dedicated source topic on the linked source cluster that is **not yet
+   mirrored** on the destination (the destination topic takes the source
+   topic's name, so a topic of that name must not already exist there). Also
+   create a Kafka REST API key (cluster-scoped) and note the REST endpoint
+   (`https://pkc-....confluent.cloud`) and the cluster id (`lkc-...`).
 
 Export the environment variables:
 
@@ -71,6 +78,14 @@ export MONEDULA_CLOUD_SR_SECRET=...
 
 # Optional — ACL subtest: the NUMERIC service-account id, NOT the sa- resource id
 export MONEDULA_CLOUD_SERVICE_ACCOUNT_ID=9207877
+
+# Optional — mirror subtest (set all six or none):
+export MONEDULA_CLOUD_REST_ENDPOINT=https://pkc-xxxxx.eu-central-1.aws.confluent.cloud
+export MONEDULA_CLOUD_REST_KEY=XXXXXXXXXXXXXXXX
+export MONEDULA_CLOUD_REST_SECRET=...
+export MONEDULA_CLOUD_CLUSTER_ID=lkc-xxxxx
+export MONEDULA_CLOUD_LINK_NAME=my-link
+export MONEDULA_CLOUD_MIRROR_SOURCE_TOPIC=mgcc-mirror-source
 ```
 
 **The service-account id must be the NUMERIC id** (e.g. `9207877`), not the
@@ -109,6 +124,9 @@ Gating behavior:
   listing the missing variables. An explicitly configured run must never
   silently pass while doing nothing.
 - **SR trio partially set** → fail (same reasoning).
+- **Kafka REST / mirror set partially set** (any of the six
+  `MONEDULA_CLOUD_REST_*`, `_CLUSTER_ID`, `_LINK_NAME`,
+  `_MIRROR_SOURCE_TOPIC`) → fail; none set → the mirror subtest skips.
 
 ## What runs, what skips
 
@@ -123,7 +141,32 @@ Gating behavior:
 | `07_quota_negative` | core trio | quota apply **fails gracefully** (Cloud manages quotas itself) |
 | `08_user_negative` | core trio | SCRAM user apply **fails gracefully** (Cloud has no SCRAM APIs) |
 | `09_import` | core trio | `import cluster` emits the run topic, skips internal topics, leaks no secrets (falls back to `--skip-users` if Cloud rejects SCRAM listing) |
-| summary | — | fixed-width verdict table (Topics / ACLs / Schemas / Quotas / Users / Import) |
+| `10_mirror` | the six REST/mirror vars (skips otherwise) | `doctor` exits 0 and lists the link; `apply` a `KafkaMirrorTopic` (`<prefix>-mirror`, `sourceTopicName` = the source topic, no `topicName`); `verify` exits 0; the destination topic is then deleted through the Kafka Admin API |
+| summary | — | fixed-width verdict table (Topics / ACLs / Schemas / Quotas / Users / Import / Mirrors) |
+
+### Mirror subtest notes
+
+- Environment variables for it:
+
+  | Variable | Meaning |
+  |---|---|
+  | `MONEDULA_CLOUD_REST_ENDPOINT` | Kafka REST endpoint of the destination cluster |
+  | `MONEDULA_CLOUD_REST_KEY` / `_SECRET` | Kafka REST API key and secret (basic auth) |
+  | `MONEDULA_CLOUD_CLUSTER_ID` | destination cluster id (`lkc-...`, required on Cloud) |
+  | `MONEDULA_CLOUD_LINK_NAME` | existing cluster link (must have no prefix) |
+  | `MONEDULA_CLOUD_MIRROR_SOURCE_TOPIC` | existing source topic on the linked cluster, not yet mirrored |
+
+- Prerequisites: a pre-existing link **without a prefix** and a dedicated
+  source topic. The harness does not create links or source topics. If a
+  topic with the source topic's name already exists on the destination, the
+  subtest fails its precondition instead of risking the deletion of a topic it
+  did not create.
+- Cost and cleanup: a mirror topic is a normal topic plus link replication
+  traffic for a few minutes (cents). The destination topic does not carry the
+  run prefix; the subtest deletes it itself through the Kafka Admin API and
+  records the result. A failed delete is reported as `FAILED` with a
+  `CLEANUP FAILED` note in the `Mirrors` summary row; remove the leftover
+  destination topic manually (an aborted run can also leave it behind).
 
 A validated run does **not** by itself change the support matrix: update the
 Confluent Cloud column and section of

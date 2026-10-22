@@ -20,6 +20,7 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/api/v1alpha1"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka/franz"
+	restconfluent "github.com/monedula-dev/monedula-gitops/internal/kafkarest/confluent"
 	"github.com/monedula-dev/monedula-gitops/internal/secrets"
 )
 
@@ -69,6 +70,20 @@ spec:
         valueFrom:
           env: %s
 `, env.srURL, envSRKey, envSRSecret)
+	}
+	if env.hasREST {
+		fmt.Fprintf(&b, `  rest:
+    endpoint: %s
+    clusterId: %s
+    auth:
+      type: basic
+      username:
+        valueFrom:
+          env: %s
+      password:
+        valueFrom:
+          env: %s
+`, env.restEndpoint, env.clusterID, envRESTKey, envRESTSecret)
 	}
 	path := filepath.Join(dir, "cluster.yaml")
 	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
@@ -145,6 +160,21 @@ func topicYAMLSchemaV2(topic, retentionMS string) string {
 func topicYAMLWithMinISR(topic, retentionMS, minISR string) string {
 	return topicYAML(topic, retentionMS, false) +
 		fmt.Sprintf("    min.insync.replicas: \"%s\"\n", minISR)
+}
+
+// mirrorTopicYAML renders a KafkaMirrorTopic with no topicName, so the
+// destination topic takes the source topic's name.
+func mirrorTopicYAML(name, link, source string) string {
+	return fmt.Sprintf(`apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaMirrorTopic
+metadata:
+  name: %s
+spec:
+  clusterRef:
+    name: cloud
+  linkName: %s
+  sourceTopicName: %s
+`, name, link, source)
 }
 
 // accessPolicyYAML renders a KafkaAccessPolicy granting the listed operations
@@ -318,6 +348,53 @@ func cleanupTopic(t *testing.T, admin *franz.Client, runPrefix, topic string) {
 		}
 		t.Logf("cleanup: deleted topic %s", topic)
 	})
+}
+
+// isMirrorOnLink reports whether Kafka REST lists dest as a mirror topic on
+// the given link. Cleanup uses it so a pre-existing normal topic is never
+// deleted.
+func isMirrorOnLink(env cloudEnv, dest string) (bool, error) {
+	user, pass := os.Getenv(envRESTKey), os.Getenv(envRESTSecret)
+	rc, err := restconfluent.New(env.restEndpoint, env.clusterID, restconfluent.BasicAuth(user, pass), nil)
+	if err != nil {
+		return false, err
+	}
+	ctx, cancel := adminCtx()
+	defer cancel()
+	mirrors, err := rc.ListMirrors(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, m := range mirrors {
+		if m.MirrorTopicName == dest && m.LinkName == env.linkName {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// deleteMirrorDestination deletes the mirror destination topic through the
+// Kafka Admin API, but only when REST shows it as a mirror on the configured
+// link, and returns a note recording the outcome. failed is true when the
+// topic may be left behind; the caller must fail the test then.
+func deleteMirrorDestination(t *testing.T, env cloudEnv, admin *franz.Client, dest string) (note string, failed bool) {
+	isMirror, err := isMirrorOnLink(env, dest)
+	if err != nil {
+		t.Logf("cleanup: listing mirrors: %v", err)
+		return fmt.Sprintf("CLEANUP FAILED: could not confirm %s is a mirror (%v) - check and remove it manually", dest, err), true
+	}
+	if !isMirror {
+		t.Logf("cleanup: %s is not a mirror on link %s; nothing deleted", dest, env.linkName)
+		return "cleanup skipped: apply did not create a mirror", false
+	}
+	ctx, cancel := adminCtx()
+	defer cancel()
+	if err := admin.DeleteTopic(ctx, dest); err != nil {
+		t.Logf("cleanup: deleting mirror destination topic %s: %v", dest, err)
+		return fmt.Sprintf("CLEANUP FAILED: mirror topic %s not deleted (%v) - remove it manually", dest, err), true
+	}
+	t.Logf("cleanup: deleted mirror destination topic %s", dest)
+	return fmt.Sprintf("mirror topic %s created, verified and deleted", dest), false
 }
 
 // cleanupACLs registers deletion of every ACL whose resource name carries the
@@ -541,6 +618,22 @@ func verdictRow(surface string, ok bool, skipReason, okNote string) summaryRow {
 		return summaryRow{surface, "OK", okNote}
 	default:
 		return summaryRow{surface, "FAILED", "see subtest logs"}
+	}
+}
+
+// mirrorRow maps the mirror subtest outcome to OK / SKIPPED / FAILED. A
+// recorded cleanup failure is always surfaced, whatever the verdict.
+func mirrorRow(skipReason string, ok bool, note string) summaryRow {
+	cleanupFailed := strings.HasPrefix(note, "CLEANUP FAILED")
+	switch {
+	case skipReason != "":
+		return summaryRow{"Mirrors", "SKIPPED", skipReason}
+	case ok && !cleanupFailed:
+		return summaryRow{"Mirrors", "OK", note}
+	case cleanupFailed:
+		return summaryRow{"Mirrors", "FAILED", note}
+	default:
+		return summaryRow{"Mirrors", "FAILED", "see subtest logs"}
 	}
 }
 
