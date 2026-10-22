@@ -50,6 +50,10 @@ type ClientFactory interface {
 	// Registry configured. cleanup must always be non-nil and is deferred by the
 	// caller (it closes the Kafka client).
 	For(ctx context.Context, c *v1alpha1.KafkaCluster) (k kafka.AdminClient, sr schemaregistry.Client, cleanup func(), err error)
+	// KafkaFor builds only the Kafka admin client for c, for callers that
+	// never use Schema Registry (so a registry misconfiguration cannot block
+	// them). cleanup must always be non-nil and is deferred by the caller.
+	KafkaFor(ctx context.Context, c *v1alpha1.KafkaCluster) (k kafka.AdminClient, cleanup func(), err error)
 	// MDSFor builds the MDS client for c. Returns (nil, nil) when the cluster
 	// has no authorization.mds configured — callers must nil-guard the result.
 	MDSFor(ctx context.Context, c *v1alpha1.KafkaCluster) (mds.Client, error)
@@ -227,6 +231,16 @@ func (f *DefaultClientFactory) For(ctx context.Context, c *v1alpha1.KafkaCluster
 		return nil, nil, func() {}, err
 	}
 	return k, sr, cleanup, nil
+}
+
+// KafkaFor resolves the cluster's secrets from its own namespace and builds
+// only the Kafka admin client.
+func (f *DefaultClientFactory) KafkaFor(ctx context.Context, c *v1alpha1.KafkaCluster) (kafka.AdminClient, func(), error) {
+	k, cleanup, err := cluster.BuildKafkaClient(c, &operator.K8sResolver{Client: f.Client, Namespace: c.Namespace, Ctx: ctx})
+	if err != nil {
+		return nil, func() {}, err
+	}
+	return k, cleanup, nil
 }
 
 // MDSFor resolves the cluster's secrets from its own namespace and builds the

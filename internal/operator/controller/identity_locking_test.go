@@ -101,6 +101,11 @@ func (f *sequenceFactory) For(context.Context, *v1alpha1.KafkaCluster) (kafka.Ad
 	return c, nil, func() {}, nil
 }
 
+func (f *sequenceFactory) KafkaFor(ctx context.Context, c *v1alpha1.KafkaCluster) (kafka.AdminClient, func(), error) {
+	k, _, cleanup, err := f.For(ctx, c)
+	return k, cleanup, err
+}
+
 func (f *sequenceFactory) RESTFor(context.Context, *v1alpha1.KafkaCluster) (kafkarest.Client, error) {
 	return nil, nil
 }

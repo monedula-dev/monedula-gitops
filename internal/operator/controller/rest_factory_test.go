@@ -80,3 +80,31 @@ func TestRESTForNilWithoutRest(t *testing.T) {
 		t.Fatalf("RESTFor = %v, %v; want nil, nil", rc, err)
 	}
 }
+
+// TestKafkaForSkipsSchemaRegistry: KafkaFor builds only the Kafka client, so
+// a Schema Registry credential that cannot be resolved fails For but not
+// KafkaFor.
+func TestKafkaForSkipsSchemaRegistry(t *testing.T) {
+	f := &DefaultClientFactory{Client: fake.NewClientBuilder().WithScheme(newScheme(t)).Build()}
+	c := clusterObj()
+	c.Spec.BootstrapServers = "localhost:9092"
+	c.Spec.SchemaRegistry = &v1alpha1.SchemaRegistryConf{
+		Endpoint: "http://localhost:8081",
+		Auth: &v1alpha1.SchemaRegistryAuth{
+			Type:     "basic",
+			Username: v1alpha1.ValueFrom{ValueFrom: v1alpha1.ValueSource{Inline: "u"}},
+			Password: v1alpha1.ValueFrom{ValueFrom: v1alpha1.ValueSource{
+				SecretKeyRef: &v1alpha1.SecretKeyRef{Name: "missing", Key: "password"},
+			}},
+		},
+	}
+	if _, _, cleanup, err := f.For(t.Context(), c); err == nil {
+		cleanup()
+		t.Fatal("For must fail on the unresolvable Schema Registry secret")
+	}
+	k, cleanup, err := f.KafkaFor(t.Context(), c)
+	if err != nil || k == nil || cleanup == nil {
+		t.Fatalf("KafkaFor = %v, %v; want a Kafka client and nil error", k, err)
+	}
+	cleanup()
+}

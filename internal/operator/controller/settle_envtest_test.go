@@ -45,6 +45,11 @@ func (f delayingFactory) For(ctx context.Context, c *v1alpha1.KafkaCluster) (kaf
 	return f.inner.For(ctx, c)
 }
 
+func (f delayingFactory) KafkaFor(ctx context.Context, c *v1alpha1.KafkaCluster) (kafka.AdminClient, func(), error) {
+	time.Sleep(f.delay)
+	return f.inner.KafkaFor(ctx, c)
+}
+
 func (f delayingFactory) RESTFor(ctx context.Context, c *v1alpha1.KafkaCluster) (kafkarest.Client, error) {
 	return f.inner.RESTFor(ctx, c)
 }

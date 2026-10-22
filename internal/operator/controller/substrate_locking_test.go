@@ -174,6 +174,10 @@ func (f clusterKeyedFactory) For(_ context.Context, c *v1alpha1.KafkaCluster) (k
 	return f.kafkas[c.Name], nil, func() {}, nil
 }
 
+func (f clusterKeyedFactory) KafkaFor(_ context.Context, c *v1alpha1.KafkaCluster) (kafka.AdminClient, func(), error) {
+	return f.kafkas[c.Name], func() {}, nil
+}
+
 func (f clusterKeyedFactory) RESTFor(context.Context, *v1alpha1.KafkaCluster) (kafkarest.Client, error) {
 	return nil, nil
 }

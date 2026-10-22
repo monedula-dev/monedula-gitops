@@ -147,10 +147,11 @@ func (r *KafkaMirrorTopicReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return res, err
 	}
 
-	// Build the Kafka admin and REST clients. rest is nil when the cluster has
-	// no spec.rest; the engine reports that as terminal RESTNotConfigured.
+	// Build the Kafka admin and REST clients (never the Schema Registry
+	// client: mirrors do not use it). rest is nil when the cluster has no
+	// spec.rest; the engine reports that as terminal RESTNotConfigured.
 	var rest kafkarest.Client
-	k, _, cleanup, berr := r.Clients.For(ctx, &cluster)
+	k, cleanup, berr := r.Clients.KafkaFor(ctx, &cluster)
 	if berr == nil {
 		defer cleanup()
 		rest, berr = r.Clients.RESTFor(ctx, &cluster)

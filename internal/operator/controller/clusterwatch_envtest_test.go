@@ -72,6 +72,10 @@ func (f mdsGatedFactory) For(context.Context, *v1alpha1.KafkaCluster) (kafka.Adm
 	return f.k, f.sr, func() {}, nil
 }
 
+func (f mdsGatedFactory) KafkaFor(context.Context, *v1alpha1.KafkaCluster) (kafka.AdminClient, func(), error) {
+	return f.k, func() {}, nil
+}
+
 func (f mdsGatedFactory) RESTFor(context.Context, *v1alpha1.KafkaCluster) (kafkarest.Client, error) {
 	return nil, nil
 }

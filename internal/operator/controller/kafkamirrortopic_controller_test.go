@@ -47,6 +47,11 @@ func (f *countingFactory) For(ctx context.Context, c *v1alpha1.KafkaCluster) (ka
 	return f.stubFactory.For(ctx, c)
 }
 
+func (f *countingFactory) KafkaFor(ctx context.Context, c *v1alpha1.KafkaCluster) (kafka.AdminClient, func(), error) {
+	f.calls.Add(1)
+	return f.stubFactory.KafkaFor(ctx, c)
+}
+
 func (f *countingFactory) MDSFor(ctx context.Context, c *v1alpha1.KafkaCluster) (mds.Client, error) {
 	f.calls.Add(1)
 	return f.stubFactory.MDSFor(ctx, c)
@@ -124,6 +129,23 @@ func getMirror(t *testing.T, c client.Client, name string) *v1alpha1.KafkaMirror
 		t.Fatalf("get mirror %s: %v", name, err)
 	}
 	return &m
+}
+
+// TestMirrorReconcilerSkipsSchemaRegistryClient: mirrors never use Schema
+// Registry, so a registry client that cannot be built must not block them.
+func TestMirrorReconcilerSkipsSchemaRegistryClient(t *testing.T) {
+	s := newScheme(t)
+	c := mirrorFakeBuilder(s, mirrorCtrlClusterObj(), mirrorCtrlCR("orders-mirror", dupT0)).Build()
+	k, rest := mirrorCtrlFixture("")
+	r := &KafkaMirrorTopicReconciler{Client: c, Scheme: s,
+		Clients: stubFactory{k: k, rest: rest, srErr: errors.New("injected: schema registry secret missing")}}
+
+	if _, err := reconcileMirrorReq(t, r, "orders-mirror"); err != nil {
+		t.Fatalf("a Schema Registry build failure must not affect a mirror: %v", err)
+	}
+	if got := rest.Created(); len(got) != 1 {
+		t.Fatalf("CreateMirror calls = %v, want 1", got)
+	}
 }
 
 func TestMirrorReconcilerCreatesMirror(t *testing.T) {
