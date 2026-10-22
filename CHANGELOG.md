@@ -53,6 +53,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of "outcome unknown, re-run diff before retrying".
 - **CLI, apply output:** a result whose status equals its action (`Rejected`) is printed once
   (`Rejected KafkaMirrorTopic/...`), not as `Rejected Rejected ...`.
+- **CLI, apply output:** apply now shows why an operation was rejected: a `Rejected` result
+  carries the plan's reason (`message=...` in human output, `message` in JSON/YAML), and an
+  empty risk is no longer printed as `(risk=)`.
 - **CLI, `import`:** a mirror topic whose only explicitly set configs are synced by its cluster
   link no longer gets a `MirrorConfigNotImported` warning or makes the import partial.
 

@@ -1,6 +1,7 @@
 package output
 
 import (
+	"encoding/json"
 	"flag"
 	"os"
 	"path/filepath"
@@ -291,4 +292,57 @@ func TestApplyResultNoDuplicatedStatus(t *testing.T) {
 	require.NotEmpty(t, line)
 	require.Equal(t, 1, strings.Count(line, "Rejected"), line)
 	require.True(t, strings.HasPrefix(line, "Rejected KafkaMirrorTopic/orders"), line)
+}
+
+func rejectedAndNormalResult() executor.Result {
+	rej := operations.New(operations.Rejected)
+	rej.Kind, rej.Name, rej.Target = "KafkaMirrorTopic", "ledger-mirror", "ledger"
+	rej.Risk = ""
+	rej.Message = "topic exists and is not a mirror"
+	ok := operations.New(operations.CreateTopic)
+	ok.Kind, ok.Name, ok.Target = "KafkaTopic", "orders", "orders"
+	ok.Risk = operations.RiskLow
+	return executor.Result{Results: []executor.OpResult{
+		{Op: rej, Status: executor.Rejected},
+		{Op: ok, Status: executor.Succeeded},
+	}}
+}
+
+func applyLine(t *testing.T, out []byte, needle string) string {
+	t.Helper()
+	for _, l := range strings.Split(string(out), "\n") {
+		if strings.Contains(l, needle) {
+			return l
+		}
+	}
+	t.Fatalf("no line containing %q in:\n%s", needle, out)
+	return ""
+}
+
+func TestApplyResultHumanShowsRejectionMessage(t *testing.T) {
+	got, err := RenderApplyResult(rejectedAndNormalResult(), "human", "dest")
+	require.NoError(t, err)
+
+	rej := applyLine(t, got, "KafkaMirrorTopic/ledger-mirror")
+	require.Contains(t, rej, "message=topic exists and is not a mirror")
+	require.NotContains(t, rej, "(risk=)")
+	require.Equal(t, "Rejected KafkaMirrorTopic/ledger-mirror ledger message=topic exists and is not a mirror", rej)
+
+	normal := applyLine(t, got, "KafkaTopic/orders")
+	require.Contains(t, normal, "(risk=Low)")
+	require.NotContains(t, normal, "message=")
+}
+
+func TestApplyResultJSONCarriesMessage(t *testing.T) {
+	got, err := RenderApplyResult(rejectedAndNormalResult(), "json", "dest")
+	require.NoError(t, err)
+
+	var doc struct {
+		Results []map[string]any `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal(got, &doc))
+	require.Len(t, doc.Results, 2)
+	require.Equal(t, "topic exists and is not a mirror", doc.Results[0]["message"])
+	_, has := doc.Results[1]["message"]
+	require.False(t, has, "an op without a message must not carry a message key: %v", doc.Results[1])
 }
