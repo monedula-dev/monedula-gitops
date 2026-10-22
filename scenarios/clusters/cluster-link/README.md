@@ -35,6 +35,8 @@ that the compose file carries as its literal default. Cluster linking needs no l
 | `29092` | Destination Kafka, PLAINTEXT, host-facing |
 | `8090` | Destination embedded Kafka REST v3 (`http://localhost:8090/kafka/v3/...`) |
 
+Host port 8090 is also used by the `auth-mds` profile, so the two stacks cannot run at the same time.
+
 In the compose network the brokers are `source:9092` and `dest:9092`.
 
 ## Security model

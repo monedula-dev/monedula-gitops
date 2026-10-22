@@ -34,7 +34,7 @@ that no mirror named `ledger` exists.
 
 ```bash
 docker compose -p mon-e2e-link -f ../clusters/cluster-link/compose.yaml up -d
-docker compose -p mon-e2e-link -f ../clusters/cluster-link/compose.yaml wait link-setup
+docker compose -p mon-e2e-link -f ../clusters/cluster-link/compose.yaml ps -a link-setup  # wait until it shows Exited (0)
 
 monedula-gitops doctor --cluster-config-file ../clusters/cluster-link/cluster.yaml
 monedula-gitops apply  -f manifests --cluster-config-file ../clusters/cluster-link/cluster.yaml
