@@ -25,6 +25,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `KafkaTopic` `deletionPolicy: Delete` verification is best effort: an out-of-band promote or
   failover racing the final check cannot be excluded, so `Orphan` stays the default.
 
+### Changed
+- **Operator, `KafkaTopic` finalizer:** the `gitops.monedula.dev/force-finalizer-removal`
+  annotation now always orphans: the finalizer is removed with no topic, ACL or schema cleanup,
+  even when the cluster is reachable and `gitops.monedula.dev/allow-delete` is set.
+- **Operator, `KafkaTopic` finalizer:** with `deletionPolicy: Delete`, the finalizer orphans (no
+  topic, ACL or schema cleanup) when another `KafkaTopic` or a `KafkaMirrorTopic` still claims the
+  same topic on the same cluster, and emits an `OrphanedToCoClaimant` warning naming it.
+- **Operator, `KafkaTopic` finalizer:** new deletion outcomes, reported as warning events with the
+  finalizer kept: `MirrorDeleteBlocked` (the topic is a live or stopping mirror), `DeleteBlocked`
+  (the co-claimant check or the mirror-state check failed, the Kafka REST client could not be
+  built, or the final mirror verification blocked) and `PartialCleanup` (the final verification blocked after ACLs were already revoked;
+  the event lists completed and blocked stages).
+- **Operator, `KafkaTopic`:** on clusters with `spec.rest`, a Kafka REST outage makes the topic
+  not Ready and nothing is applied (fail closed) instead of reconciling without the mirror guard.
+- **Mirror guard (CLI and operator):** for a live or stopping mirror topic, or one whose mirror
+  state is unknown, ACL prune (`DeleteAcl`) on the literal topic resource is now suppressed as
+  well as ACL creation. Prefixed and wildcard ACLs are unaffected.
+
 ## [1.0.0] - 2026-10-09
 
 First stable release. Since 0.1.0 it updates dependencies, backs the documented support matrix
