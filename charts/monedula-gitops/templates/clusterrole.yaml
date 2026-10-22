@@ -49,6 +49,7 @@ rules:
   resources:
   - kafkaaccesspolicies
   - kafkaclusters
+  - kafkamirrortopics
   - kafkatopics
   verbs:
   - get
@@ -60,6 +61,7 @@ rules:
   - gitops.monedula.dev
   resources:
   - kafkaaccesspolicies/finalizers
+  - kafkamirrortopics/finalizers
   - kafkaquotas/finalizers
   - kafkarolebindings/finalizers
   - kafkatopics/finalizers
@@ -71,6 +73,7 @@ rules:
   resources:
   - kafkaaccesspolicies/status
   - kafkaclusters/status
+  - kafkamirrortopics/status
   - kafkaquotas/status
   - kafkarolebindings/status
   - kafkatopics/status

@@ -22,6 +22,7 @@ const (
 	controllerKafkaQuota        = "kafkaquota"
 	controllerKafkaRoleBinding  = "kafkarolebinding"
 	controllerKafkaUser         = "kafkauser"
+	controllerKafkaMirrorTopic  = "kafkamirrortopic"
 )
 
 // recordReconcile is the deferred metrics tail every reconciler runs: it
@@ -140,6 +141,15 @@ func statusEqualIgnoringTimestamps(a, b client.Object) bool {
 			}
 			st.LastCheckedTime = nil
 			st.LastAppliedTime = nil
+			zeroConditionTransitionTimes(st.Conditions)
+		})
+	case *v1alpha1.KafkaMirrorTopic:
+		newObj, ok := b.(*v1alpha1.KafkaMirrorTopic)
+		return ok && equalIgnoringTimestamps(oldObj.Status, newObj.Status, func(st *v1alpha1.KafkaMirrorTopicStatus) {
+			if st == nil {
+				return
+			}
+			st.LastCheckedTime = nil
 			zeroConditionTransitionTimes(st.Conditions)
 		})
 	default:
