@@ -1,0 +1,7 @@
+clusterId: dr-cluster-id
+links:
+  - name: prod-to-dr
+    state: PAUSED
+    configs:
+      cluster.link.prefix: ""
+mirrors: []

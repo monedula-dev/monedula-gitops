@@ -17,6 +17,7 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/access"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
 	"github.com/monedula-dev/monedula-gitops/internal/managedset"
+	"github.com/monedula-dev/monedula-gitops/internal/mirror"
 	"github.com/monedula-dev/monedula-gitops/internal/operations"
 	"github.com/monedula-dev/monedula-gitops/internal/quota"
 	"github.com/monedula-dev/monedula-gitops/internal/rbac"
@@ -57,6 +58,18 @@ func (dt DesiredTopic) ignoresField(field string) bool {
 	return false
 }
 
+// DesiredMirror is a cluster-link mirror topic the manifests declare.
+type DesiredMirror struct {
+	Kind, Namespace, Name string // Name is the resource name (metadata.name)
+	LinkName              string
+	SourceTopicName       string
+	TopicName             string // effective destination name
+	TopicNameExplicit     bool   // spec.topicName was non-empty in the manifest
+	ReplicationFactor     int    // 0 = not declared
+	Config                map[string]string
+	Mode                  string
+}
+
 // DesiredSchema is a schema subject the manifests declare.
 type DesiredSchema struct {
 	Subject       string
@@ -70,6 +83,7 @@ type DesiredSchema struct {
 // Desired is the full set of declared state plus the managed scope derived from it.
 type Desired struct {
 	Topics  []DesiredTopic
+	Mirrors []DesiredMirror // declared cluster-link mirror topics
 	ACLs    []access.ACL
 	Schemas []DesiredSchema
 	Quotas  []quota.Desired // compiled KafkaQuota entities + limit values (spec §39)
@@ -219,6 +233,13 @@ type Live struct {
 	// condition (spec §17.1); the CLI logs it as a warning. Empty when the
 	// fetch was skipped (no subjects managed) or it succeeded.
 	GlobalCompatibilityErr string
+
+	// Mirrors is the live destination mirror snapshot (topics, mirrors and
+	// cluster links read through Kafka Admin and Kafka REST). nil means mirror
+	// state was not read (no REST configured); computeMirrorOps then reports a
+	// StateReadError for every declared mirror. Ignored when no mirrors are
+	// declared.
+	Mirrors *mirror.Snapshot
 }
 
 // aclTarget is a human-readable identifier for an ACL operation.
@@ -239,12 +260,25 @@ func aclTarget(a access.ACL) string {
 func Compute(desired Desired, live Live) []operations.Operation {
 	var ops []operations.Operation
 
-	ops = append(ops, computeTopicOps(desired, live)...)
-	ops = append(ops, computeACLOps(desired, live)...)
-	ops = append(ops, computeSchemaOps(desired, live)...)
+	guards := guardedTopics(desired, live)
+	topicOps := computeTopicOps(desired, live)
+	aclOps := computeACLOps(desired, live)
+	schemaOps := computeSchemaOps(desired, live)
+	if len(guards) > 0 {
+		topicOps = filterTopicOps(topicOps, guards)
+		aclOps = filterACLOps(aclOps, guards)
+		schemaOps = filterSchemaOps(schemaOps, guards)
+		for _, name := range sortedGuardNames(guards) {
+			topicOps = append(topicOps, guards[name])
+		}
+	}
+	ops = append(ops, topicOps...)
+	ops = append(ops, aclOps...)
+	ops = append(ops, schemaOps...)
 	ops = append(ops, computeQuotaOps(desired, live)...)
 	ops = append(ops, computeRoleBindingOps(desired, live)...)
 	ops = append(ops, computeUserOps(desired, live)...)
+	ops = append(ops, computeMirrorOps(desired, live)...)
 
 	// Deterministic final ordering: by Action, then Target, then Field, then Subject.
 	// This is a STABLE refinement of already-sorted inputs (topic ops are emitted
@@ -269,6 +303,98 @@ func Compute(desired Desired, live Live) []operations.Operation {
 		return ops[i].Subject < ops[j].Subject
 	})
 	return ops
+}
+
+// guardedTopics returns, for every declared KafkaTopic that must not be
+// mutated, the single finding op that replaces that topic's ops. It is empty
+// when live.Mirrors is nil (the cluster has no Kafka REST configured): mirror
+// state is then not read and KafkaTopic behaves exactly as before.
+//
+//   - Mirror / StoppingMirror -> Rejected (a mirror is managed by KafkaMirrorTopic);
+//   - Unknown (snapshot incomplete or in error) -> StateReadError;
+//   - Normal / Absent / StoppedFormerMirror -> not guarded.
+func guardedTopics(desired Desired, live Live) map[string]operations.Operation {
+	if live.Mirrors == nil {
+		return nil
+	}
+	out := map[string]operations.Operation{}
+	for _, dt := range desired.Topics {
+		var op operations.Operation
+		switch live.Mirrors.Classify(dt.Name) {
+		case mirror.Mirror, mirror.StoppingMirror:
+			op = operations.New(operations.Rejected)
+			op.Message = fmt.Sprintf("topic %q is a mirror topic on link %q; manage it with KafkaMirrorTopic",
+				dt.Name, live.Mirrors.Mirrors[dt.Name].LinkName)
+		case mirror.Unknown:
+			op = operations.New(operations.StateReadError)
+			reason := "snapshot not read"
+			if m, ok := live.Mirrors.Mirrors[dt.Name]; ok && live.Mirrors.Complete() {
+				reason = fmt.Sprintf("mirror status %q unrecognized or Kafka/REST state inconsistent", m.Status)
+			} else if live.Mirrors.Err != nil {
+				reason = live.Mirrors.Err.Error()
+			}
+			op.Message = fmt.Sprintf("cannot read mirror state for topic %q: %s", dt.Name, reason)
+		default:
+			continue
+		}
+		op.Kind, op.Namespace, op.Name, op.Target = dt.Kind, dt.Namespace, dt.Name, dt.Name
+		op.Mode = dt.Mode
+		out[dt.Name] = op
+	}
+	return out
+}
+
+func sortedGuardNames(g map[string]operations.Operation) []string {
+	names := make([]string, 0, len(g))
+	for n := range g {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// filterTopicOps drops the topic mutation/finding ops of guarded topics.
+func filterTopicOps(ops []operations.Operation, guards map[string]operations.Operation) []operations.Operation {
+	var out []operations.Operation
+	for _, op := range ops {
+		if _, g := guards[op.Target]; g {
+			switch op.Action {
+			case operations.CreateTopic, operations.UpdateTopicConfig, operations.IncreasePartitions,
+				operations.UpdateReplicationFactor, operations.Rejected:
+				continue
+			}
+		}
+		out = append(out, op)
+	}
+	return out
+}
+
+// filterACLOps drops CreateAcl ops on the literal topic resource of a guarded
+// topic. Prefixed/wildcard patterns and other resource types are policy and kept.
+func filterACLOps(ops []operations.Operation, guards map[string]operations.Operation) []operations.Operation {
+	var out []operations.Operation
+	for _, op := range ops {
+		if op.Action == operations.CreateAcl && op.ACL != nil &&
+			op.ACL.ResourceType == "topic" && op.ACL.PatternType == "literal" {
+			if _, g := guards[op.ACL.ResourceName]; g {
+				continue
+			}
+		}
+		out = append(out, op)
+	}
+	return out
+}
+
+// filterSchemaOps drops schema ops owned by a guarded topic.
+func filterSchemaOps(ops []operations.Operation, guards map[string]operations.Operation) []operations.Operation {
+	var out []operations.Operation
+	for _, op := range ops {
+		if _, g := guards[op.Topic]; g && op.Topic != "" {
+			continue
+		}
+		out = append(out, op)
+	}
+	return out
 }
 
 func computeTopicOps(desired Desired, live Live) []operations.Operation {

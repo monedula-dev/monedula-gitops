@@ -82,6 +82,18 @@ func (c *Client) GetTopic(ctx context.Context, name string) (*kafka.TopicState, 
 	}, nil
 }
 
+// ClusterID returns the Kafka-protocol cluster ID reported by the brokers.
+func (c *Client) ClusterID(ctx context.Context) (string, error) {
+	md, err := c.adm.Metadata(ctx)
+	if err != nil {
+		return "", fmt.Errorf("fetching cluster metadata: %w", err)
+	}
+	if md.Cluster == "" {
+		return "", errors.New("kafka: broker reported no cluster id")
+	}
+	return md.Cluster, nil
+}
+
 // ListTopics returns the observed state of every (non-internal) topic.
 //
 // Topic configs are fetched in a single batched DescribeTopicConfigs call

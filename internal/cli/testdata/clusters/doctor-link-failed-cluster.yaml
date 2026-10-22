@@ -1,0 +1,13 @@
+# Destination cluster with a LINK_PAUSED link (warn) and a FAILED link with a
+# REST-reported link_error (fail).
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: dr
+  annotations:
+    gitops.monedula.dev/mock-state-file: mirror-state.yaml
+    gitops.monedula.dev/mock-rest-file: doctor-link-failed-rest.yaml
+spec:
+  bootstrapServers: localhost:9092
+  rest:
+    endpoint: https://broker-0.dr:8090/kafka

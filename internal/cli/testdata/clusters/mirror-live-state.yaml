@@ -1,0 +1,9 @@
+# Kafka mock where the mirror topic payments.orders already exists with the
+# declared retention.ms, so the only finding comes from the mirror status.
+clusterId: dr-cluster-id
+topics:
+  - name: payments.orders
+    partitions: 3
+    replicationFactor: 3
+    config:
+      retention.ms: "604800000"

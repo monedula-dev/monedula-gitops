@@ -256,6 +256,14 @@ func TestIntegration_ListTopicsExcludesInternal(t *testing.T) {
 	}
 }
 
+// TestIntegration_ClusterID confirms the broker reports a non-empty cluster ID.
+func TestIntegration_ClusterID(t *testing.T) {
+	client := startKafka(t)
+	id, err := client.ClusterID(ctxT(t))
+	require.NoError(t, err)
+	assert.NotEmpty(t, id)
+}
+
 // --- ACLs ---
 
 // TestIntegration_ACLRoundTrip is CRITICAL: it exercises Create -> List ->

@@ -11,6 +11,7 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/api/v1alpha1"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
 	"github.com/monedula-dev/monedula-gitops/internal/mds"
+	"github.com/monedula-dev/monedula-gitops/internal/mirror"
 	"github.com/monedula-dev/monedula-gitops/internal/rbac"
 	"github.com/monedula-dev/monedula-gitops/internal/schemaregistry"
 	"github.com/monedula-dev/monedula-gitops/internal/schemaregistry/recordname"
@@ -46,6 +47,42 @@ type Result struct {
 	// surfaced in the import report for manual attribution rather than written into
 	// manifests (spec §24.1).
 	RecordNameSubjects []RecordNameSubject
+	// Mirrors holds reconstructed KafkaMirrorTopic manifests (see buildMirrors).
+	Mirrors []*v1alpha1.KafkaMirrorTopic
+	// Partial is true when the import skipped ownership it could not prove:
+	// any warning carrying one of partialWarningCodes.
+	Partial bool
+}
+
+// Stable diagnostic codes that prefix mirror-import warnings so automation can
+// detect them; those in partialWarningCodes mark the import as partial.
+const (
+	codeMirrorConfigNotImported          = "MirrorConfigNotImported"
+	codeMirrorUnhealthy                  = "MirrorUnhealthy"
+	codeMirrorImportDeferred             = "MirrorImportDeferred"
+	codeMirrorStaleEntry                 = "MirrorStaleEntry"
+	codeExternallyManagedOrAmbiguousACLs = "ExternallyManagedOrAmbiguousACLs"
+)
+
+// MirrorUnhealthy is deliberately absent: an unhealthy mirror is imported in
+// full, so its warning is diagnostic only and does not make the import partial.
+var partialWarningCodes = []string{
+	codeMirrorConfigNotImported,
+	codeMirrorImportDeferred,
+	codeMirrorStaleEntry,
+	codeExternallyManagedOrAmbiguousACLs,
+}
+
+// isPartial reports whether any warning carries a partial-import code.
+func isPartial(warnings []string) bool {
+	for _, w := range warnings {
+		for _, c := range partialWarningCodes {
+			if strings.HasPrefix(w, c+":") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // SchemaFile is a schema body to be written verbatim alongside the manifests.
@@ -155,6 +192,17 @@ func Build(snap Snapshot, clusterName string, accessBackends []string, mdsCfg *v
 	aclActive := backendActive(accessBackends, "acl")
 	rbacActive := backendActive(accessBackends, "rbac")
 
+	// --- 0. Mirror ACL filter ---
+	// ACLs on a mirror whose link syncs ACLs (or whose ACL sync state is
+	// unknown) cannot be told apart from link-synced ones, so they are dropped
+	// from a COPY of the snapshot ACLs. Everything downstream — folding, the
+	// round-trip check and the all-explicit fallback — sees the filtered set,
+	// so dropping them never forces the fallback.
+	var mirrorWarnings []string
+	if aclActive {
+		snap.ACLs = filterMirrorACLs(snap, &mirrorWarnings)
+	}
+
 	// --- 1. Topics ---
 	topics := make([]*v1alpha1.KafkaTopic, 0, len(snap.Topics))
 	topicByName := make(map[string]*v1alpha1.KafkaTopic, len(snap.Topics))
@@ -207,6 +255,10 @@ func Build(snap Snapshot, clusterName string, accessBackends []string, mdsCfg *v
 		topicByName[ts.Name] = tp
 	}
 
+	// --- 1b. Mirror topics (share the topics' metadata.name owner map) ---
+	mirrors := buildMirrors(snap, clusterName, topicNameOwner, &mirrorWarnings)
+	warnings = append(warnings, mirrorWarnings...)
+
 	// --- 2. Schemas: set spec.schema and record verbatim schema files ---
 	// Schema warnings accumulate in their own slice so the fallbackAllExplicit
 	// path (which rebuilds the Result from scratch) can re-attach them: schema
@@ -255,7 +307,7 @@ func Build(snap Snapshot, clusterName string, accessBackends []string, mdsCfg *v
 	users := buildUsers(snap, clusterName, opt, &warnings)
 
 	sort.Strings(warnings)
-	r := Result{Topics: topics, Policies: policies, RoleBindings: roleBindings, Quotas: quotas, Users: users, SchemaFiles: schemaFiles, Warnings: warnings, RecordNameSubjects: snap.RecordNameSubjects}
+	r := Result{Topics: topics, Policies: policies, RoleBindings: roleBindings, Quotas: quotas, Users: users, SchemaFiles: schemaFiles, Warnings: warnings, RecordNameSubjects: snap.RecordNameSubjects, Mirrors: mirrors}
 
 	// --- 5. Two-sided recompile-verify safety net ---
 	aclOK := !aclActive || roundTripsClean(r, snap)
@@ -273,7 +325,9 @@ func Build(snap Snapshot, clusterName string, accessBackends []string, mdsCfg *v
 		r.RecordNameSubjects = snap.RecordNameSubjects
 		r.Quotas = quotas
 		r.Users = users
+		r.Mirrors = mirrors
 		r.Warnings = append(r.Warnings, schemaWarnings...)
+		r.Warnings = append(r.Warnings, mirrorWarnings...)
 		r.Warnings = append(r.Warnings,
 			"access reconstruction could not reproduce live state on all active backends; emitted all ACLs as KafkaAccessPolicy and all role bindings as KafkaRoleBinding for fidelity")
 		// Re-verify the ACL side after the fallback. The fallback emits every
@@ -288,7 +342,110 @@ func Build(snap Snapshot, clusterName string, accessBackends []string, mdsCfg *v
 		sort.Strings(r.Warnings)
 	}
 
+	r.Partial = isPartial(r.Warnings)
 	return r
+}
+
+// filterMirrorACLs returns a copy of snap.ACLs without the literal topic ACLs
+// on mirror topics whose link has ACL sync enabled or unknown, and on deferred
+// (PENDING_STOPPED) mirrors regardless of ACL sync (the topic is imported as
+// neither kind, so its ACLs have no owner yet), warning once per affected
+// mirror. ACLs on mirrors whose link has ACL sync conclusively
+// disabled are kept: they reach buildPolicies as raw rules (mirrors are not in
+// topicByName, so they never fold into a KafkaTopic).
+func filterMirrorACLs(snap Snapshot, warnings *[]string) []kafka.ACLState {
+	if len(snap.Mirrors) == 0 && len(snap.DeferredMirrors) == 0 {
+		return snap.ACLs
+	}
+	drop := map[string]string{} // mirror topic -> link name
+	for _, m := range snap.Mirrors {
+		if s := snap.MirrorLinks[m.LinkName].ACLSync; s == nil || *s {
+			drop[m.Name] = m.LinkName
+		}
+	}
+	for _, name := range snap.DeferredMirrors {
+		drop[name] = ""
+	}
+	counts := map[string]int{}
+	out := make([]kafka.ACLState, 0, len(snap.ACLs))
+	for _, a := range snap.ACLs {
+		if _, ok := drop[a.ResourceName]; ok && a.ResourceType == "topic" && a.PatternType == "literal" {
+			counts[a.ResourceName]++
+			continue
+		}
+		out = append(out, a)
+	}
+	for _, m := range snap.Mirrors {
+		if n := counts[m.Name]; n > 0 {
+			*warnings = append(*warnings, fmt.Sprintf(
+				"%s: %d ACL(s) on mirror topic %q were not imported (ACL sync on link %q is enabled or unknown)",
+				codeExternallyManagedOrAmbiguousACLs, n, m.Name, m.LinkName))
+		}
+	}
+	for _, name := range snap.DeferredMirrors {
+		if n := counts[name]; n > 0 {
+			*warnings = append(*warnings, fmt.Sprintf(
+				"%s: %d ACL(s) on mirror topic %q were not imported (mirror is being promoted; re-run import after it finishes)",
+				codeExternallyManagedOrAmbiguousACLs, n, name))
+		}
+	}
+	return out
+}
+
+// buildMirrors converts snap.Mirrors to KafkaMirrorTopic manifests. TopicName
+// is always explicit (the live destination name), ReplicationFactor is the
+// observed one, and Config/DeletionPolicy are never set: config provenance on
+// a mirror cannot be proven, so explicitly set configs are only reported.
+// Metadata names come from topicMetaName + disambiguateName with the topics'
+// owner map, so a mirror never shares a metadata.name with a topic. Deferred
+// (PENDING_STOPPED) mirrors and stale STOPPED entries are reported, not built.
+func buildMirrors(snap Snapshot, clusterName string, nameOwner map[string]bool, warnings *[]string) []*v1alpha1.KafkaMirrorTopic {
+	var out []*v1alpha1.KafkaMirrorTopic
+	for _, ms := range snap.Mirrors {
+		base := topicMetaName(ms.Name)
+		metaName := disambiguateName(base, nameOwner)
+		if metaName != base {
+			*warnings = append(*warnings, fmt.Sprintf(
+				"topic name collision: mirror topic %q slugs to a metadata.name already used by another topic; renamed to %q for uniqueness", ms.Name, metaName))
+		}
+		m := &v1alpha1.KafkaMirrorTopic{
+			TypeMeta: metav1.TypeMeta{APIVersion: v1alpha1.APIVersion, Kind: "KafkaMirrorTopic"},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        metaName,
+				Annotations: map[string]string{importedFromAnnotation: clusterName},
+			},
+			Spec: v1alpha1.KafkaMirrorTopicSpec{
+				ClusterRef:      v1alpha1.ClusterRef{Name: clusterName},
+				LinkName:        ms.LinkName,
+				SourceTopicName: ms.SourceTopicName,
+				TopicName:       ms.Name,
+			},
+		}
+		if ms.ReplicationFactor > 0 {
+			rf := ms.ReplicationFactor
+			m.Spec.ReplicationFactor = &rf
+		}
+		if n := len(ms.ExplicitConfigKeys); n > 0 {
+			*warnings = append(*warnings, fmt.Sprintf(
+				"%s: mirror topic %q has %d explicitly set configs; declare reviewed local keys manually",
+				codeMirrorConfigNotImported, ms.Name, n))
+		}
+		if mirror.ClassifyStatus(ms.Status) == mirror.StatusUnhealthy {
+			*warnings = append(*warnings, fmt.Sprintf("%s: mirror topic %q is %s", codeMirrorUnhealthy, ms.Name, ms.Status))
+		}
+		out = append(out, m)
+	}
+	for _, name := range snap.DeferredMirrors {
+		*warnings = append(*warnings, fmt.Sprintf(
+			"%s: mirror topic %q is being promoted (PENDING_STOPPED); re-run import after it finishes",
+			codeMirrorImportDeferred, name))
+	}
+	for _, name := range snap.StaleMirrors {
+		*warnings = append(*warnings, fmt.Sprintf(
+			"%s: REST lists stopped mirror %q but the topic does not exist; skipped",
+			codeMirrorStaleEntry, name))
+	}
+	return out
 }
 
 // applySchemas sets spec.schema on each topic with a matched value subject and

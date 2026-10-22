@@ -17,6 +17,8 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/api/v1alpha1"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka/franz"
+	"github.com/monedula-dev/monedula-gitops/internal/kafkarest"
+	restconfluent "github.com/monedula-dev/monedula-gitops/internal/kafkarest/confluent"
 	"github.com/monedula-dev/monedula-gitops/internal/mds"
 	mdsconfluent "github.com/monedula-dev/monedula-gitops/internal/mds/confluent"
 	"github.com/monedula-dev/monedula-gitops/internal/schemaregistry"
@@ -143,6 +145,56 @@ func BuildMDSClient(c *v1alpha1.KafkaCluster, r secrets.Resolver) (mds.Client, e
 	}
 
 	return mdsconfluent.New(mdsConf.Endpoint, auth, httpClient)
+}
+
+// BuildKafkaRESTClient constructs a live kafkarest.Client for the cluster's
+// Kafka REST v3 endpoint, or (nil, nil) when the cluster has no rest block.
+// Credentials and TLS material are resolved via r; mirrors BuildMDSClient.
+func BuildKafkaRESTClient(c *v1alpha1.KafkaCluster, r secrets.Resolver) (kafkarest.Client, error) {
+	if c == nil || c.Spec.REST == nil {
+		return nil, nil
+	}
+	rc := c.Spec.REST
+
+	httpClient, err := buildHTTPClientTLS(rc.TLS, r, "rest")
+	if err != nil {
+		return nil, fmt.Errorf("building rest http client: %w", err)
+	}
+
+	var auth *restconfluent.Auth
+	if rc.Auth != nil {
+		switch rc.Auth.Type {
+		case "basic":
+			if rc.Auth.Username == nil || rc.Auth.Password == nil {
+				return nil, fmt.Errorf("rest: basic auth requires username and password")
+			}
+			user, err := r.Resolve(*rc.Auth.Username)
+			if err != nil {
+				return nil, fmt.Errorf("rest: resolving auth.username: %w", err)
+			}
+			pass, err := r.Resolve(*rc.Auth.Password)
+			if err != nil {
+				return nil, fmt.Errorf("rest: resolving auth.password: %w", err)
+			}
+			auth = restconfluent.BasicAuth(user, pass)
+		case "bearer":
+			if rc.Auth.Token == nil {
+				return nil, fmt.Errorf("rest: bearer auth requires token")
+			}
+			tok, err := r.Resolve(*rc.Auth.Token)
+			if err != nil {
+				return nil, fmt.Errorf("rest: resolving auth.token: %w", err)
+			}
+			auth = restconfluent.BearerAuth(tok)
+		case "mtls":
+			// The client cert is already on httpClient's TLS config.
+			auth = restconfluent.MTLSAuth()
+		default:
+			return nil, fmt.Errorf("rest: unsupported auth type %q (supported: basic, bearer, mtls)", rc.Auth.Type)
+		}
+	}
+
+	return restconfluent.New(rc.Endpoint, rc.ClusterID, auth, httpClient)
 }
 
 // buildHTTPClientTLS constructs an *http.Client with an optional TLS config

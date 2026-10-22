@@ -77,6 +77,8 @@ type ScramUpsert struct {
 type AdminClient interface {
 	GetTopic(ctx context.Context, name string) (*TopicState, error)
 	ListTopics(ctx context.Context) ([]TopicState, error)
+	// ClusterID returns the Kafka-protocol cluster ID. An empty ID is an error.
+	ClusterID(ctx context.Context) (string, error)
 	ListACLs(ctx context.Context) ([]ACLState, error)
 	DescribeTopicConfigs(ctx context.Context, topic string) ([]ConfigEntry, error)
 

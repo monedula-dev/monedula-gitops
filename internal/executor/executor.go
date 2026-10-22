@@ -25,10 +25,18 @@ import (
 // a schema op encountered with a nil Schema client is recorded as Failed.
 // MDS may be nil when no role-binding ops are present or MDS is not configured;
 // a role-binding op encountered with a nil MDS client is recorded as Failed.
+// Mirrors may be nil when no mirror ops are present or Kafka REST is not
+// configured; a CreateMirrorTopic/UpdateMirrorTopicConfig op encountered with
+// a nil Mirrors client is recorded as Failed ("Kafka REST not configured").
 type Clients struct {
 	Kafka  kafka.AdminClient
 	Schema schemaregistry.Client
 	MDS    mds.Client
+
+	// Mirrors executes cluster-link mirror writes (mirror.Writer). Each call
+	// re-checks live state immediately before writing (plan time is not
+	// write time) and never retries a POST.
+	Mirrors Mirrors
 
 	// Passwords resolves SCRAM password references (Operation.PasswordRef) at
 	// EXECUTE time, immediately before UpsertScramCredential — the password
@@ -42,6 +50,15 @@ type Clients struct {
 	// and client errors identify field names/sources only, per the
 	// kafka.ScramUpsert and secrets contracts).
 	Passwords secrets.Resolver
+}
+
+// errRESTNotConfigured records a mirror op met with a nil Clients.Mirrors.
+var errRESTNotConfigured = errors.New("Kafka REST not configured") //nolint:staticcheck // ST1005: "Kafka" is a product name
+
+// Mirrors is the mirror-write seam, satisfied by mirror.Writer.
+type Mirrors interface {
+	CreateMirror(ctx context.Context, op operations.Operation) error
+	AlterMirrorConfig(ctx context.Context, op operations.Operation) error
 }
 
 // Approvals carry the operator's explicit consent for gated actions, set from
@@ -218,6 +235,21 @@ func applyOne(ctx context.Context, c Clients, op operations.Operation, ap Approv
 		return OpResult{Op: op, Status: Rejected}
 	}
 
+	// Mirror findings are never executed. Progressing is informational (the
+	// mirror is converging on its own) and does not fail the run. Unhealthy,
+	// stopping, promoted and replication-factor findings are terminal
+	// divergence only a spec or out-of-band change resolves: Unsupported.
+	// StateReadError is a transient read failure: Failed.
+	switch op.Action {
+	case operations.MirrorTopicProgressing:
+		return OpResult{Op: op, Status: ReportOnly}
+	case operations.MirrorTopicUnhealthy, operations.MirrorTopicStopping,
+		operations.MirrorTopicPromoted, operations.UnsupportedReplicationFactorChange:
+		return OpResult{Op: op, Status: Unsupported, Err: op.Message}
+	case operations.StateReadError:
+		return OpResult{Op: op, Status: Failed, Err: op.Message}
+	}
+
 	// SchemaSuperseded (spec §12.1) is terminal divergence: the manifest schema
 	// is an older registered version of the subject, so re-registering can
 	// never converge (the registry dedupes to the old version). Like
@@ -300,6 +332,21 @@ func dispatch(ctx context.Context, c Clients, op operations.Operation, failedTop
 			failedTopics[op.Target] = true
 		}
 		return err
+	case operations.CreateMirrorTopic:
+		if c.Mirrors == nil {
+			failedTopics[op.Target] = true
+			return errRESTNotConfigured
+		}
+		err := c.Mirrors.CreateMirror(ctx, op)
+		if err != nil {
+			failedTopics[op.Target] = true
+		}
+		return err
+	case operations.UpdateMirrorTopicConfig:
+		if c.Mirrors == nil {
+			return errRESTNotConfigured
+		}
+		return c.Mirrors.AlterMirrorConfig(ctx, op)
 	case operations.UpdateTopicConfig:
 		return client.UpdateTopicConfig(ctx, op.Target, map[string]string{op.Field: op.To})
 	case operations.IncreasePartitions:

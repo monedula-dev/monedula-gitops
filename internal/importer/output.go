@@ -28,6 +28,20 @@ func sortedTopics(res Result) []*v1alpha1.KafkaTopic {
 	return ts
 }
 
+// sortedMirrors returns the Result's mirror topics ordered by namespace then name.
+func sortedMirrors(res Result) []*v1alpha1.KafkaMirrorTopic {
+	ms := make([]*v1alpha1.KafkaMirrorTopic, len(res.Mirrors))
+	copy(ms, res.Mirrors)
+	sort.Slice(ms, func(i, j int) bool {
+		a, b := ms[i].ObjectMeta, ms[j].ObjectMeta
+		if a.Namespace != b.Namespace {
+			return a.Namespace < b.Namespace
+		}
+		return a.Name < b.Name
+	})
+	return ms
+}
+
 // sortedPolicies returns the Result's policies ordered by namespace then name.
 func sortedPolicies(res Result) []*v1alpha1.KafkaAccessPolicy {
 	ps := make([]*v1alpha1.KafkaAccessPolicy, len(res.Policies))
@@ -85,7 +99,8 @@ func sortedUsers(res Result) []*v1alpha1.KafkaUser {
 }
 
 // RenderManifests produces a deterministic multi-document YAML stream: all
-// Topics first (sorted by namespace then name), then all Policies (same order),
+// Topics first (sorted by namespace then name), then all Mirrors, then all
+// Policies (same order),
 // then all Quotas, then all RoleBindings, then all Users (same order). Each
 // document is serialized via sigs.k8s.io/yaml (JSON tag order, omitempty),
 // separated by a "---\n" line, with a trailing newline.
@@ -93,6 +108,11 @@ func RenderManifests(res Result) ([]byte, error) {
 	var buf bytes.Buffer
 	for _, tp := range sortedTopics(res) {
 		if err := writeDoc(&buf, tp); err != nil {
+			return nil, err
+		}
+	}
+	for _, m := range sortedMirrors(res) {
+		if err := writeDoc(&buf, m); err != nil {
 			return nil, err
 		}
 	}
@@ -194,6 +214,12 @@ type ImportSummary struct {
 	RoleBindings       int `json:"roleBindings"`       // reconstructed KafkaRoleBinding manifests
 	Users              int `json:"users"`              // reconstructed KafkaUser manifests
 	RecordNameSubjects int `json:"recordNameSubjects"` // RecordName-strategy subjects needing manual attribution (spec §24.1)
+	// Mirrors counts reconstructed KafkaMirrorTopic manifests; omitted when 0
+	// so imports without mirrors render exactly as before.
+	Mirrors int `json:"mirrors,omitempty"`
+	// Partial is true when the import skipped ownership it could not prove
+	// (warnings carry a stable diagnostic code); omitted when false.
+	Partial bool `json:"partial,omitempty"`
 }
 
 // Summarize computes the ImportOutput for a Result.
@@ -219,6 +245,8 @@ func Summarize(res Result, cluster string) ImportOutput {
 			RoleBindings:       len(res.RoleBindings),
 			Users:              len(res.Users),
 			RecordNameSubjects: len(res.RecordNameSubjects),
+			Mirrors:            len(res.Mirrors),
+			Partial:            res.Partial,
 		},
 		Warnings:           res.Warnings,
 		RecordNameSubjects: res.RecordNameSubjects,
@@ -236,6 +264,9 @@ func renderSummaryHuman(out ImportOutput) []byte {
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, "Cluster: %s\n", out.Cluster)
 	fmt.Fprintf(&buf, "Topics: %d\n", out.Summary.Topics)
+	if out.Summary.Mirrors > 0 {
+		fmt.Fprintf(&buf, "Mirror topics: %d\n", out.Summary.Mirrors)
+	}
 	fmt.Fprintf(&buf, "Topic access rules: %d\n", out.Summary.TopicAccessRules)
 	fmt.Fprintf(&buf, "Access policies: %d\n", out.Summary.AccessPolicies)
 	fmt.Fprintf(&buf, "Policy rules: %d\n", out.Summary.PolicyRules)
@@ -256,6 +287,9 @@ func renderSummaryHuman(out ImportOutput) []byte {
 		fmt.Fprintf(&buf, "Users: %d\n", out.Summary.Users)
 	}
 	fmt.Fprintf(&buf, "RecordName subjects: %d\n", out.Summary.RecordNameSubjects)
+	if out.Summary.Partial {
+		buf.WriteString("Partial: true (some ownership was not imported; see warnings)\n")
+	}
 	if len(out.Warnings) > 0 {
 		buf.WriteString("Warnings:\n")
 		for _, w := range out.Warnings {
@@ -278,11 +312,12 @@ type WriteOutcome struct {
 }
 
 // WriteToDir writes each object as a single-document YAML file under dir:
-// topics at <dir>/<namespace>/topics/<name>.yaml, policies at
+// topics at <dir>/<namespace>/topics/<name>.yaml, mirror topics at
+// <dir>/<namespace>/mirrors/<name>.yaml, policies at
 // <dir>/<namespace>/access/<name>.yaml, and users at
 // <dir>/<namespace>/users/<name>.yaml. Parent directories are created as
-// needed. Objects are processed in sorted order (topics, policies, quotas,
-// rolebindings, users, then schemas) so the Written/Skipped slices are
+// needed. Objects are processed in sorted order (topics, mirrors, policies,
+// quotas, rolebindings, users, then schemas) so the Written/Skipped slices are
 // deterministic.
 //
 // overwrite controls behavior when a target file already exists:
@@ -302,6 +337,12 @@ func WriteToDir(res Result, dir string, overwrite string) (WriteOutcome, error) 
 	for _, tp := range sortedTopics(res) {
 		path := filepath.Join(dir, tp.Namespace, "topics", tp.Name+".yaml")
 		if err := writeOne(&outcome, path, tp, overwrite); err != nil {
+			return outcome, err
+		}
+	}
+	for _, m := range sortedMirrors(res) {
+		path := filepath.Join(dir, m.Namespace, "mirrors", m.Name+".yaml")
+		if err := writeOne(&outcome, path, m, overwrite); err != nil {
 			return outcome, err
 		}
 	}

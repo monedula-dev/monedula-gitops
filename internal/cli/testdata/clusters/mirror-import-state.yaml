@@ -1,0 +1,12 @@
+# Kafka mock for mirror import: one normal topic, one mirror, one promoting mirror.
+clusterId: dr-cluster-id
+topics:
+  - name: unrelated
+    partitions: 1
+    replicationFactor: 3
+  - name: payments.orders
+    partitions: 3
+    replicationFactor: 3
+  - name: payments.pending
+    partitions: 3
+    replicationFactor: 3

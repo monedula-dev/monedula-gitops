@@ -11,7 +11,9 @@ import (
 
 	"github.com/monedula-dev/monedula-gitops/internal/api/v1alpha1"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
+	"github.com/monedula-dev/monedula-gitops/internal/kafkarest"
 	"github.com/monedula-dev/monedula-gitops/internal/mds"
+	"github.com/monedula-dev/monedula-gitops/internal/mirror"
 	"github.com/monedula-dev/monedula-gitops/internal/schemaregistry"
 	"github.com/monedula-dev/monedula-gitops/internal/schemaregistry/recordname"
 )
@@ -24,6 +26,23 @@ type TopicSnapshot struct {
 	Partitions        int
 	ReplicationFactor int
 	Config            map[string]string
+}
+
+// MirrorSnapshot is a destination topic that REST classifies as a live mirror
+// (healthy, unhealthy or progressing). ExplicitConfigKeys lists the topic's
+// explicitly set config keys (ConfigEntry.Default==false, the same notion as
+// TopicSnapshot.Config); they are reported, never imported, because their
+// provenance (link-synced vs local) cannot be proven.
+type MirrorSnapshot struct {
+	Name, LinkName, SourceTopicName, Status string
+	ReplicationFactor                       int
+	ExplicitConfigKeys                      []string
+}
+
+// MirrorLinkInfo is what import needs to know about a cluster link. ACLSync is
+// the parsed acl.sync.enable value; nil when absent or unreadable (unknown).
+type MirrorLinkInfo struct {
+	ACLSync *bool
 }
 
 // TopicSchemas holds the value and/or key subject state matched to a topic via
@@ -92,6 +111,20 @@ type Snapshot struct {
 	// cluster's configured scopes. Empty when no MDS client is supplied.
 	// Sorted by mds.RoleBinding.Key() for determinism (spec §40).
 	RoleBindings []mds.RoleBinding
+
+	// Mirrors holds destination topics classified as live mirror topics; they
+	// are removed from Topics so no physical topic is imported twice. Sorted by
+	// Name. Empty without SnapshotOptions.REST.
+	Mirrors []MirrorSnapshot
+	// MirrorLinks maps each link that owns at least one mirror to its import
+	// relevant info (ACL sync). Nil without SnapshotOptions.REST.
+	MirrorLinks map[string]MirrorLinkInfo
+	// DeferredMirrors lists mirror topics being promoted (PENDING_STOPPED):
+	// imported as neither kind until promotion finishes. Sorted.
+	DeferredMirrors []string
+	// StaleMirrors lists STOPPED mirror entries that REST still reports but
+	// whose topic does not exist in Kafka: skipped (neither kind). Sorted.
+	StaleMirrors []string
 }
 
 // SnapshotOptions carries flags that skip optional, potentially-expensive
@@ -116,6 +149,11 @@ type SnapshotOptions struct {
 	// these topics are broker/platform-managed, not something a GitOps manifest
 	// should claim ownership of.
 	IncludeInternal bool
+
+	// REST, when non-nil, is the destination cluster's Kafka REST client:
+	// topics are classified against cluster-link mirror state (see
+	// classifyMirrors). Nil leaves the import unchanged (no mirror awareness).
+	REST kafkarest.Client
 }
 
 // isInternalTopic reports whether name is Kafka or Confluent-platform
@@ -207,6 +245,15 @@ func ReadSnapshot(ctx context.Context, kClient kafka.AdminClient, srClient schem
 		return out[i].Name < out[j].Name
 	})
 
+	var ms mirrorSplit
+	if opt.REST != nil {
+		ms, err = classifyMirrors(ctx, kClient, opt.REST, out, opt.IncludeInternal)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		out = ms.topics
+	}
+
 	acls, err := kClient.ListACLs(ctx)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("list acls: %w", err)
@@ -241,6 +288,10 @@ func ReadSnapshot(ctx context.Context, kClient kafka.AdminClient, srClient schem
 	}
 
 	snap := Snapshot{Topics: out, ACLs: acls, Quotas: quotas, ScramCredentials: creds}
+	if opt.REST != nil {
+		snap.Mirrors, snap.MirrorLinks, snap.DeferredMirrors = ms.mirrors, ms.links, ms.deferred
+		snap.StaleMirrors = ms.stale
+	}
 
 	if mdsClient != nil {
 		var rbs []mds.RoleBinding
@@ -274,6 +325,118 @@ func ReadSnapshot(ctx context.Context, kClient kafka.AdminClient, srClient schem
 	}
 
 	return snap, nil
+}
+
+// mirrorSplit is the result of classifyMirrors.
+type mirrorSplit struct {
+	topics   []TopicSnapshot
+	mirrors  []MirrorSnapshot
+	links    map[string]MirrorLinkInfo
+	deferred []string
+	stale    []string
+}
+
+// classifyMirrors reads the mirror classification snapshot (Kafka Admin and
+// REST cluster IDs verified equal) and splits topics: Mirror -> mirrors,
+// StoppingMirror -> deferred, StoppedFormerMirror and Normal -> stay topics.
+// Any incomplete read or Unknown classification fails the import: guessing the
+// resource kind could import one physical topic as the wrong kind. The one
+// exception is a STOPPED REST entry whose topic does not exist (a stale entry
+// for a deleted former mirror): there is nothing to import, so it is recorded
+// in stale and skipped. Link
+// configs are read for every link that owns at least one mirror so ACL import
+// can tell whether acl.sync.enable is on.
+func classifyMirrors(ctx context.Context, k kafka.AdminClient, r kafkarest.Client, topics []TopicSnapshot, includeInternal bool) (mirrorSplit, error) {
+	listed, err := r.ListMirrors(ctx)
+	if err != nil {
+		return mirrorSplit{}, fmt.Errorf("mirror state Unknown: list mirrors: %w", err)
+	}
+	linkSet := map[string]bool{}
+	for _, m := range listed {
+		linkSet[m.LinkName] = true
+	}
+	linkNames := make([]string, 0, len(linkSet))
+	for n := range linkSet {
+		linkNames = append(linkNames, n)
+	}
+	sort.Strings(linkNames)
+
+	snap := mirror.ReadSnapshot(ctx, k, r, linkNames)
+	if !snap.Complete() {
+		return mirrorSplit{}, fmt.Errorf("mirror state Unknown: %w", snap.Err)
+	}
+
+	// A REST mirror without a matching Kafka topic is contradictory evidence.
+	mirrorNames := make([]string, 0, len(snap.Mirrors))
+	for n := range snap.Mirrors {
+		mirrorNames = append(mirrorNames, n)
+	}
+	sort.Strings(mirrorNames)
+	var stale []string
+	for _, n := range mirrorNames {
+		if !includeInternal && isInternalTopic(n) {
+			continue
+		}
+		if snap.Classify(n) == mirror.Unknown {
+			if _, hasTopic := snap.Topics[n]; !hasTopic && mirror.ClassifyStatus(snap.Mirrors[n].Status) == mirror.StatusStopped {
+				stale = append(stale, n)
+				continue
+			}
+			return mirrorSplit{}, fmt.Errorf("mirror topic %q: classification Unknown (status %q); refusing to guess its kind",
+				n, snap.Mirrors[n].Status)
+		}
+	}
+
+	out := mirrorSplit{links: map[string]MirrorLinkInfo{}, stale: stale}
+	for _, t := range topics {
+		switch c := snap.Classify(t.Name); c {
+		case mirror.Mirror:
+			m := snap.Mirrors[t.Name]
+			keys := make([]string, 0, len(t.Config))
+			for key := range t.Config {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			out.mirrors = append(out.mirrors, MirrorSnapshot{
+				Name:               t.Name,
+				LinkName:           m.LinkName,
+				SourceTopicName:    m.SourceTopicName,
+				Status:             m.Status,
+				ReplicationFactor:  t.ReplicationFactor,
+				ExplicitConfigKeys: keys,
+			})
+		case mirror.StoppingMirror:
+			out.deferred = append(out.deferred, t.Name)
+		case mirror.Normal, mirror.StoppedFormerMirror, mirror.Absent:
+			// Absent: the topic vanished between the two topic listings; keep
+			// it as observed by the importer's own read.
+			out.topics = append(out.topics, t)
+		default:
+			return mirrorSplit{}, fmt.Errorf("topic %q: mirror classification %s; refusing to guess its kind", t.Name, c)
+		}
+	}
+	for _, n := range linkNames {
+		var info MirrorLinkInfo
+		if li, ok := snap.Links[n]; ok && li.ConfigErr == nil {
+			info.ACLSync = parseBoolConfig(li.Configs["acl.sync.enable"])
+		}
+		out.links[n] = info
+	}
+	return out, nil
+}
+
+// parseBoolConfig parses "true"/"false" case-insensitively; anything else
+// (including missing) is nil (unknown).
+func parseBoolConfig(v string) *bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "true":
+		b := true
+		return &b
+	case "false":
+		b := false
+		return &b
+	}
+	return nil
 }
 
 // schemaMatch is the structured result of gatherSchemas, replacing the

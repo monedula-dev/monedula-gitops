@@ -1,0 +1,3 @@
+# Kafka mock whose cluster ID differs from the REST mock's (dr-cluster-id).
+clusterId: some-other-cluster-id
+topics: []

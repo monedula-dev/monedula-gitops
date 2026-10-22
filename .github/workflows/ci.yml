@@ -34,8 +34,8 @@ jobs:
       # quotes, corrupting CEL rules; see the guard comment in types.go.
       - name: forbid CEL empty-string literals in types.go
         run: |
-          if grep -n "== ''" internal/api/v1alpha1/types.go; then
-            echo "CEL empty-string literal reintroduced — see the guard comment in internal/api/v1alpha1/types.go (use .size() == 0)"
+          if grep -nE "[!=]= ''" internal/api/v1alpha1/types.go; then
+            echo "CEL empty-string literal reintroduced — see the guard comment in internal/api/v1alpha1/types.go (use .size() == 0 / .size() > 0)"
             exit 1
           fi
       # -race roughly 2-3x's runtime (acceptance suite alone is ~205s unraced);

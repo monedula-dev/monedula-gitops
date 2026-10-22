@@ -1,0 +1,14 @@
+# REST mock: payments.orders is a mirror on prod-to-dr with status FAILED.
+clusterId: dr-cluster-id
+links:
+  - name: prod-to-dr
+    state: ACTIVE
+    configs:
+      topic.config.sync.include: "cleanup.policy"
+      cluster.link.prefix: ""
+mirrors:
+  - linkName: prod-to-dr
+    mirrorTopicName: payments.orders
+    sourceTopicName: payments.orders
+    status: FAILED
+    numPartitions: 3
