@@ -326,3 +326,15 @@ func TestImportMirrorLocalConfigStillWarned(t *testing.T) {
 		`MirrorConfigNotImported: mirror topic "payments.orders" has 1 explicitly set configs; declare reviewed local keys manually`)
 	require.True(t, res.Partial)
 }
+
+func TestImportMirrorConfigsCountedWhenLinkSyncUnknown(t *testing.T) {
+	// No link configs at all: link-managed keys cannot be told apart, so every
+	// explicit key is counted and the import is partial.
+	k, r := mirrorFixture(t, "ACTIVE", map[string]string{"retention.ms": "604800000", "cleanup.policy": "delete"}, nil, nil)
+	res := importWithREST(t, k, r)
+
+	require.Len(t, res.Mirrors, 1)
+	require.Contains(t, res.Warnings,
+		`MirrorConfigNotImported: mirror topic "payments.orders" has 2 explicitly set configs; declare reviewed local keys manually`)
+	require.True(t, res.Partial)
+}

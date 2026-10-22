@@ -94,7 +94,7 @@ func (w Writer) CreateMirror(ctx context.Context, op operations.Operation) error
 	}
 	if err := w.REST.CreateMirror(ctx, req); err != nil {
 		var se *kafkarest.StatusError
-		if errors.As(err, &se) && se.Code >= 400 && se.Code < 500 {
+		if errors.As(err, &se) && se.Code >= 400 && se.Code < 500 && se.Code != 408 {
 			return fmt.Errorf("create mirror %s rejected by Kafka REST (%d): %w", op.Target, se.Code, err)
 		}
 		return fmt.Errorf("create mirror %s: outcome unknown, re-run diff before retrying: %w", op.Target, err)

@@ -285,3 +285,14 @@ func TestWriterCreateTransportErrorIsUnknown(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestWriterCreateServerErrorIsUnknown(t *testing.T) {
+	for _, code := range []int{503, 408} {
+		_, r, w := writerFixture(t)
+		r.Fail("CreateMirror", &kafkarest.StatusError{Code: code, Message: "uncertain"})
+		err := w.CreateMirror(context.Background(), createOp())
+		if err == nil || !strings.Contains(err.Error(), "outcome unknown") || strings.Contains(err.Error(), "rejected by Kafka REST") {
+			t.Fatalf("code %d: got %v", code, err)
+		}
+	}
+}
