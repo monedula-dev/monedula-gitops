@@ -3,6 +3,8 @@ package mirror
 import (
 	"fmt"
 	"strings"
+
+	"github.com/monedula-dev/monedula-gitops/internal/kafkarest"
 )
 
 // Link config keys consulted by the mirror rules.
@@ -34,6 +36,16 @@ func CheckPrefix(l LinkInfo, topicName, sourceTopicName string, explicit bool) e
 // LinkActive reports whether the link is in a state that allows creating
 // mirror topics on it (link_state ACTIVE).
 func LinkActive(l LinkInfo) bool { return l.Link.State == "ACTIVE" }
+
+// LinkErrorSuffix returns ": <link_error>" when REST reports a link error
+// other than NO_ERROR, so messages about a link's state carry the reason;
+// otherwise "".
+func LinkErrorSuffix(l kafkarest.Link) string {
+	if l.Error == "" || l.Error == "NO_ERROR" {
+		return ""
+	}
+	return ": " + l.Error
+}
 
 // LinkManaged reports whether a topic config key is synced from the source by
 // the link (topic.config.sync.include, exact entry or prefix entry ending in

@@ -167,3 +167,25 @@ func TestTopicGuardNilSnapshotUnchanged(t *testing.T) {
 		"UpdateTopicConfig|orders",
 	}, got)
 }
+
+func TestTopicGuardUnknownOnCompleteSnapshotNamesCause(t *testing.T) {
+	for _, tc := range []struct {
+		name, status string
+		topics       map[string]kafka.TopicState
+	}{
+		{"unrecognized status", "WEIRD", map[string]kafka.TopicState{"orders": {Name: "orders", Partitions: 3}}},
+		{"mirror without topic", "ACTIVE", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snap := mirror.NewSnapshot("c1", "c1", tc.topics,
+				liveMirror(mtLink, "orders", "orders", tc.status), activeLink(nil))
+			require.True(t, snap.Complete())
+			ops := Compute(guardDesired(), guardLive(&snap))
+			got := opsFor(ops, operations.StateReadError, "orders")
+			require.Len(t, got, 1)
+			require.Equal(t, `cannot read mirror state for topic "orders": mirror status "`+tc.status+
+				`" unrecognized or Kafka/REST state inconsistent`, got[0].Message)
+			require.NotContains(t, got[0].Message, "snapshot not read")
+		})
+	}
+}

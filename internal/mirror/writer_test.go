@@ -81,12 +81,16 @@ func TestWriterCreateRechecksTopicAppeared(t *testing.T) {
 }
 
 func TestWriterCreateRechecksMirrorAppeared(t *testing.T) {
-	k, r, w := writerFixture(t)
-	if err := k.CreateTopic(context.Background(), kafka.TopicSpec{Name: "orders", Partitions: 1, ReplicationFactor: 1}); err != nil {
-		t.Fatal(err)
-	}
+	_, r, w := writerFixture(t)
+	// Only the REST mirror entry appears (no Kafka topic): the fresh snapshot
+	// classifies the target Unknown, which must block the write on its own,
+	// independently of the topic-appeared path.
 	r.AddMirror(kafkarest.Mirror{LinkName: "l", MirrorTopicName: "orders", SourceTopicName: "orders", Status: "ACTIVE"})
-	requirePreWrite(t, w.CreateMirror(context.Background(), createOp()), r)
+	err := w.CreateMirror(context.Background(), createOp())
+	requirePreWrite(t, err, r)
+	if !strings.Contains(err.Error(), "topic orders is now Unknown, not Absent") {
+		t.Fatalf("want the Unknown (mirror entry without topic) branch, got %v", err)
+	}
 }
 
 func TestWriterCreateClusterIDMismatch(t *testing.T) {

@@ -106,6 +106,23 @@ func TestComputeMirrorOpsDecisionTable(t *testing.T) {
 			want: []want{{operations.Rejected, `link "dr-link" is PAUSED; not creating mirror`}},
 		},
 		{
+			name: "absent and link not active with link error",
+			snap: snapPtr(mirror.NewSnapshot("c1", "c1", nil, nil, map[string]mirror.LinkInfo{
+				mtLink: {Link: kafkarest.Link{Name: mtLink, State: "FAILED", Error: "AUTHENTICATION_ERROR"}, Configs: map[string]string{}},
+			})),
+			want: []want{{operations.Rejected, `link "dr-link" is FAILED; not creating mirror: AUTHENTICATION_ERROR`}},
+		},
+		{
+			name: "absent and link not active with NO_ERROR",
+			snap: snapPtr(mirror.NewSnapshot("c1", "c1", nil, nil, map[string]mirror.LinkInfo{
+				mtLink: {Link: kafkarest.Link{Name: mtLink, State: "PAUSED", Error: "NO_ERROR"}, Configs: map[string]string{}},
+			})),
+			check: func(t *testing.T, ops []operations.Operation) {
+				require.Equal(t, `link "dr-link" is PAUSED; not creating mirror`, ops[0].Message)
+			},
+			want: []want{{operations.Rejected, `not creating mirror`}},
+		},
+		{
 			name: "absent and declared key link-managed",
 			dm: func(dm *DesiredMirror) {
 				dm.Config = map[string]string{"cleanup.policy": "compact", "retention.ms": "1000"}

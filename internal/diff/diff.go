@@ -328,7 +328,9 @@ func guardedTopics(desired Desired, live Live) map[string]operations.Operation {
 		case mirror.Unknown:
 			op = operations.New(operations.StateReadError)
 			reason := "snapshot not read"
-			if live.Mirrors.Err != nil {
+			if m, ok := live.Mirrors.Mirrors[dt.Name]; ok && live.Mirrors.Complete() {
+				reason = fmt.Sprintf("mirror status %q unrecognized or Kafka/REST state inconsistent", m.Status)
+			} else if live.Mirrors.Err != nil {
 				reason = live.Mirrors.Err.Error()
 			}
 			op.Message = fmt.Sprintf("cannot read mirror state for topic %q: %s", dt.Name, reason)

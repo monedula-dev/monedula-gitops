@@ -74,7 +74,8 @@ func mirrorOpsFor(dm DesiredMirror, s *mirror.Snapshot) []operations.Operation {
 	switch class {
 	case mirror.Absent:
 		if !mirror.LinkActive(link) {
-			return one(operations.Rejected, "link %q is %s; not creating mirror", dm.LinkName, link.Link.State)
+			return one(operations.Rejected, "link %q is %s; not creating mirror%s",
+				dm.LinkName, link.Link.State, mirror.LinkErrorSuffix(link.Link))
 		}
 		var rejected []operations.Operation
 		for _, k := range keys {
