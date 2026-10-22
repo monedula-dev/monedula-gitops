@@ -28,6 +28,7 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
 	"github.com/monedula-dev/monedula-gitops/internal/kafkarest"
 	"github.com/monedula-dev/monedula-gitops/internal/mds"
+	"github.com/monedula-dev/monedula-gitops/internal/mirror"
 	"github.com/monedula-dev/monedula-gitops/internal/operator"
 	"github.com/monedula-dev/monedula-gitops/internal/operator/locking"
 	"github.com/monedula-dev/monedula-gitops/internal/operator/reconcile"
@@ -440,6 +441,70 @@ const reasonDeleteBlocked = "DeleteBlocked"
 // co-claimant scan cannot confirm a negative result.
 const claimCheckFailed = "ClaimCheckFailed"
 
+// reasonMirrorDeleteBlocked is the finalizer event reason when the REST
+// preflight classifies the topic as a live mirror (Mirror or StoppingMirror):
+// no cleanup starts and the finalizer is retained.
+const reasonMirrorDeleteBlocked = "MirrorDeleteBlocked"
+
+// reasonPartialCleanup is the Warning event reason when the final mirror
+// verification blocks AFTER ACL cleanup already ran: it lists the completed
+// and blocked stages instead of implying nothing changed.
+const reasonPartialCleanup = "PartialCleanup"
+
+// errDeletionBlocked marks a finalizer attempt stopped by the mirror-state
+// guard (not a Kafka/SR failure); handleDeletionWithClient reports it as
+// DeleteBlocked.
+var errDeletionBlocked = errors.New("deletion blocked")
+
+// topicVerifier classifies the deleting topic from fresh Kafka Admin and
+// complete all-links REST reads (mirror.VerifyTopic bound to the attempt's
+// clients and topic name).
+type topicVerifier func(context.Context) (mirror.Classification, error)
+
+// deletableClass reports whether a mirror classification allows the
+// KafkaTopic finalizer's cleanup to proceed.
+func deletableClass(c mirror.Classification) bool {
+	return c == mirror.Normal || c == mirror.StoppedFormerMirror || c == mirror.Absent
+}
+
+// finalizerVerificationBudget is the total deadline of the final mirror
+// verification: FinalizerVerificationTimeout, or
+// DefaultFinalizerVerificationTimeout when unset.
+func (r *KafkaTopicReconciler) finalizerVerificationBudget() time.Duration {
+	if r.FinalizerVerificationTimeout > 0 {
+		return r.FinalizerVerificationTimeout
+	}
+	return DefaultFinalizerVerificationTimeout
+}
+
+// finalVerify runs verify once under one total deadline with REST retries
+// disabled (no retry, backoff or Retry-After sleep). Any error, and any
+// result produced after the deadline, is returned as (Unknown, err): a late
+// result is not valid deletion evidence. A nil error does NOT imply a
+// deletable class; callers must check the class (VerifyTopic reports
+// contradictory evidence as Unknown with a nil error).
+func (r *KafkaTopicReconciler) finalVerify(ctx context.Context, verify topicVerifier) (mirror.Classification, error) {
+	vctx, cancel := context.WithTimeout(kafkarest.WithoutRetry(ctx), r.finalizerVerificationBudget())
+	defer cancel()
+	class, err := verify(vctx)
+	if err != nil {
+		return mirror.Unknown, err
+	}
+	if cerr := vctx.Err(); cerr != nil {
+		return mirror.Unknown, fmt.Errorf("verification did not complete within its deadline: %w", cerr)
+	}
+	return class, nil
+}
+
+// finalVerifyBlocked builds the errDeletionBlocked error for a final
+// verification that did not allow the next cleanup stage.
+func finalVerifyBlocked(stage, topicName string, class mirror.Classification, err error) error {
+	if err != nil {
+		return fmt.Errorf("%w at %s: Kafka topic %q: %w", errDeletionBlocked, stage, topicName, err)
+	}
+	return fmt.Errorf("%w at %s: Kafka topic %q is classified %s", errDeletionBlocked, stage, topicName, class)
+}
+
 // handleDeletion is the KafkaTopic finalizer decision ladder (mirror-topics
 // design v6, "Decision precedence and co-claimant semantics"). It runs after
 // the cluster CR resolved and BEFORE any Kafka/REST client is built, in this
@@ -547,17 +612,59 @@ func (r *KafkaTopicReconciler) findDeletionCoClaimant(ctx context.Context, topic
 // and requeues.
 //
 // rest is the destination Kafka REST client, nil when the cluster has no
-// spec.rest. It is the seam for the mirror-state preflight and final
-// verification, which are not wired in yet: no REST call is made here.
+// spec.rest. With REST, a mirror-state preflight runs here, OUTSIDE the ACL
+// substrate lock and with the ordinary (retrying) REST client, before any
+// cleanup (mirror-topics design v6, "Ordered cleanup path" step 2):
+//
+//   - Mirror / StoppingMirror: MirrorDeleteBlocked, finalizer retained,
+//     requeue at the resync cadence. Nothing is deleted.
+//   - Unknown (with or without a read error), a read or cluster-ID binding
+//     failure, or any unexpected class: DeleteBlocked carrying the cause,
+//     finalizer retained, the error is returned. Nothing is deleted, and
+//     there is no fallback to the unguarded legacy path.
+//   - Normal / StoppedFormerMirror / Absent: deleteTopicState runs with the
+//     preflight class and a verifier for the single bounded final
+//     verification it performs under the ACL lock.
+//
+// Without REST the legacy deletion runs unchanged (no verifier).
 //
 // sr may be nil (no Schema Registry configured for the cluster); in that case
 // subject deletion is skipped without error. resolver reads schema bodies for
 // subject-name computation; cluster/clusterNS scope the co-ownership ACL view.
 func (r *KafkaTopicReconciler) handleDeletionWithClient(ctx context.Context, topic *v1alpha1.KafkaTopic, k kafka.AdminClient, sr schemaregistry.Client, rest kafkarest.Client, resolver secrets.Resolver, cluster *v1alpha1.KafkaCluster, clusterNS string) (ctrl.Result, error) {
-	_ = rest // mirror-state preflight seam (see doc comment)
-	if err := r.deleteTopicState(ctx, topic, k, sr, resolver, cluster, clusterNS); err != nil {
-		r.finalizeEvent(topic, corev1.EventTypeWarning, "DeleteFailed", err.Error())
-		return ctrl.Result{}, err // transient: requeue, finalizer retained
+	var verify topicVerifier
+	var preflight mirror.Classification
+	if rest != nil {
+		name := topic.ResolvedTopicName()
+		class, err := mirror.VerifyTopic(ctx, k, rest, name)
+		switch {
+		case err == nil && (class == mirror.Mirror || class == mirror.StoppingMirror):
+			msg := fmt.Sprintf("Kafka topic %q is classified %s: no topic, ACL or schema subject cleanup "+
+				"runs while it is a live mirror; stop or promote the mirror first", name, class)
+			r.finalizeEvent(topic, corev1.EventTypeWarning, reasonMirrorDeleteBlocked, msg)
+			return ctrl.Result{RequeueAfter: resyncInterval(r.ResyncInterval)}, nil
+		case err != nil:
+			err = fmt.Errorf("mirror-state preflight for topic %q: %w", name, err)
+			r.finalizeEvent(topic, corev1.EventTypeWarning, reasonDeleteBlocked, err.Error())
+			return ctrl.Result{}, err // requeue with backoff, finalizer retained
+		case !deletableClass(class):
+			err = fmt.Errorf("mirror-state preflight for topic %q: classification %s does not prove the topic is safe to delete",
+				name, class)
+			r.finalizeEvent(topic, corev1.EventTypeWarning, reasonDeleteBlocked, err.Error())
+			return ctrl.Result{}, err // requeue with backoff, finalizer retained
+		}
+		preflight = class
+		verify = func(vctx context.Context) (mirror.Classification, error) {
+			return mirror.VerifyTopic(vctx, k, rest, name)
+		}
+	}
+	if err := r.deleteTopicState(ctx, topic, k, sr, resolver, cluster, clusterNS, verify, preflight); err != nil {
+		reason := "DeleteFailed"
+		if errors.Is(err, errDeletionBlocked) {
+			reason = reasonDeleteBlocked
+		}
+		r.finalizeEvent(topic, corev1.EventTypeWarning, reason, err.Error())
+		return ctrl.Result{}, err // requeue, finalizer retained
 	}
 	r.finalizeEvent(topic, corev1.EventTypeNormal, "Deleted", "topic, managed ACLs, and managed schema subjects deleted")
 	return r.removeFinalizer(ctx, topic)
@@ -593,8 +700,38 @@ func (r *KafkaTopicReconciler) handleDeletionWithClient(ctx context.Context, top
 // SubjectDeletionFailed Warning event and are logged, but do NOT block
 // finalizer removal: the Kafka topic is already gone; an orphaned subject is
 // preferable to a wedged namespace (spec §12).
-func (r *KafkaTopicReconciler) deleteTopicState(ctx context.Context, topic *v1alpha1.KafkaTopic, k kafka.AdminClient, sr schemaregistry.Client, resolver secrets.Resolver, cluster *v1alpha1.KafkaCluster, clusterNS string) error {
+//
+// Final mirror verification (mirror-topics design v6, "Ordered cleanup path"
+// step 4): verify is nil when the cluster has no spec.rest, and the legacy
+// sequence above runs unchanged. Otherwise preflight is the class the caller
+// obtained outside the lock (Normal, StoppedFormerMirror or Absent; anything
+// else is refused before the lock), and verify runs EXACTLY ONCE under the
+// ACL substrate lock, with one total deadline (finalizerVerificationBudget)
+// and kafkarest.WithoutRetry, so it never retries, backs off or sleeps on
+// Retry-After:
+//
+//   - preflight Normal / StoppedFormerMirror: ACLs are deleted first, then
+//     verify runs immediately before DeleteTopic.
+//   - preflight Absent: verify runs before the first ACL deletion. A topic
+//     that now exists aborts the attempt ("topic appeared during deletion;
+//     retrying from preflight") rather than turning absence recovery into an
+//     unplanned delete.
+//   - result Absent: the topic step is complete; DeleteTopic is skipped and
+//     the remaining cleanup runs. Normal / StoppedFormerMirror: DeleteTopic.
+//   - anything else, an error, or a result returned after the deadline: an
+//     errDeletionBlocked error naming the stage. If ACLs were already deleted,
+//     a PartialCleanup warning lists the completed and blocked stages. No
+//     further cleanup runs, schema subjects included, and nothing is
+//     recreated.
+//
+// The deferred unlock releases the lock on every one of these paths.
+func (r *KafkaTopicReconciler) deleteTopicState(ctx context.Context, topic *v1alpha1.KafkaTopic, k kafka.AdminClient, sr schemaregistry.Client, resolver secrets.Resolver, cluster *v1alpha1.KafkaCluster, clusterNS string, verify topicVerifier, preflight mirror.Classification) error {
 	logger := log.FromContext(ctx)
+	if verify != nil && !deletableClass(preflight) {
+		// Defensive: the caller only passes a deletable preflight class.
+		return fmt.Errorf("%w: preflight classification %q of topic %q does not allow deletion",
+			errDeletionBlocked, preflight, topic.ResolvedTopicName())
+	}
 	// Serialize the finalizer's ACL cleanup against every other ACL writer on
 	// this cluster: the shield's remaining-CR view build and the DeleteACLs it
 	// gates must be one atomic critical section, or a concurrent reconcile
@@ -612,6 +749,9 @@ func (r *KafkaTopicReconciler) deleteTopicState(ctx context.Context, topic *v1al
 	// over from a deleting CR is an inter-reconcile handover (documented in
 	// duplicate.go), not an intra-window race a lock could close; and taking
 	// an identity lock here would invert the identity → substrate order.
+	// With REST, the final mirror verification also runs under this lock, so
+	// other ACL writers may wait for up to its bounded budget (v6, "Whole-
+	// attempt deadline and ACL lock impact").
 	defer lockSubstrate(r.Locks, cluster, locking.SubstrateACL)()
 	// nil ClusterDefaults is safe here only because no current default affects
 	// ACL identity fields (principal/resource/operation). If a ClusterDefaults
@@ -626,6 +766,25 @@ func (r *KafkaTopicReconciler) deleteTopicState(ctx context.Context, topic *v1al
 	if err != nil {
 		return err
 	}
+	topicName := topic.Spec.TopicName
+	topicAbsent := false // a final verification confirmed Absent: skip DeleteTopic
+
+	// Preflight Absent: verify before the first destructive action.
+	if verify != nil && preflight == mirror.Absent {
+		const stage = "final verification before ACL deletion"
+		class, verr := r.finalVerify(ctx, verify)
+		switch {
+		case verr == nil && class == mirror.Absent:
+			topicAbsent = true
+		case verr == nil && (class == mirror.Normal || class == mirror.StoppedFormerMirror):
+			return fmt.Errorf("%w at %s: Kafka topic %q is now %s: topic appeared during deletion; retrying from preflight",
+				errDeletionBlocked, stage, topicName, class)
+		default:
+			return finalVerifyBlocked(stage, topicName, class, verr)
+		}
+	}
+
+	aclsDeleted := 0
 	if len(desiredACLs) > 0 {
 		states := make([]kafka.ACLState, 0, len(desiredACLs))
 		for _, a := range desiredACLs {
@@ -638,9 +797,35 @@ func (r *KafkaTopicReconciler) deleteTopicState(ctx context.Context, topic *v1al
 		if err := k.DeleteACLs(ctx, states); err != nil {
 			return err
 		}
+		aclsDeleted = len(states)
 	}
-	if err := k.DeleteTopic(ctx, topic.Spec.TopicName); err != nil {
-		return err
+
+	// Preflight Normal / StoppedFormerMirror: verify immediately before
+	// DeleteTopic.
+	if verify != nil && preflight != mirror.Absent {
+		const stage = "final verification before DeleteTopic"
+		class, verr := r.finalVerify(ctx, verify)
+		switch {
+		case verr == nil && class == mirror.Absent:
+			topicAbsent = true
+		case verr == nil && (class == mirror.Normal || class == mirror.StoppedFormerMirror):
+			// proceed to DeleteTopic
+		default:
+			blocked := finalVerifyBlocked(stage, topicName, class, verr)
+			if aclsDeleted > 0 {
+				msg := fmt.Sprintf("partial deletion cleanup of Kafka topic %q: completed stages: ACL deletion "+
+					"(%d tuples revoked); blocked stage: %s (%v); not run: DeleteTopic, schema subject deletion. "+
+					"Revoked ACLs are not recreated", topicName, aclsDeleted, stage, blocked)
+				r.finalizeEvent(topic, corev1.EventTypeWarning, reasonPartialCleanup, msg)
+			}
+			return blocked
+		}
+	}
+
+	if !topicAbsent {
+		if err := k.DeleteTopic(ctx, topicName); err != nil {
+			return err
+		}
 	}
 
 	// Subject deletion (spec §12): only when a Schema Registry client is
