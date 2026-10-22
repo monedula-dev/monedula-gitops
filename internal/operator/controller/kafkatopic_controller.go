@@ -94,7 +94,8 @@ type KafkaTopicReconciler struct {
 	APIReader client.Reader
 	// FinalizerVerificationTimeout is the single total deadline for the
 	// finalizer's final mirror verification under the ACL substrate lock
-	// (--finalizer-verification-timeout). Zero uses the default (5s).
+	// (--finalizer-verification-timeout). Zero uses
+	// DefaultFinalizerVerificationTimeout.
 	FinalizerVerificationTimeout time.Duration
 }
 

@@ -82,7 +82,7 @@ func newOperatorCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&opts.MirrorStallThreshold, "mirror-stall-threshold", controller.DefaultMirrorStallThreshold,
 		fmt.Sprintf("how long a KafkaMirrorTopic may report an unchanged transitional mirror status before it "+
 			"is reported as stalled (minimum %s); a PENDING_STOPPED mirror is drift immediately", minMirrorStallThreshold))
-	cmd.Flags().DurationVar(&opts.FinalizerVerificationTimeout, "finalizer-verification-timeout", 5*time.Second,
+	cmd.Flags().DurationVar(&opts.FinalizerVerificationTimeout, "finalizer-verification-timeout", controller.DefaultFinalizerVerificationTimeout,
 		fmt.Sprintf("total deadline for the KafkaTopic finalizer's final mirror verification before a "+
 			"deletionPolicy Delete cleanup (must be > 0 and <= %s)", maxFinalizerVerificationTimeout))
 	cmd.Flags().IntVar(&opts.MaxConcurrentReconciles, "max-concurrent-reconciles", controller.DefaultMaxConcurrentReconciles,

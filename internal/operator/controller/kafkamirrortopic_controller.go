@@ -34,6 +34,11 @@ import (
 // StallThreshold is zero.
 const DefaultMirrorStallThreshold = 30 * time.Minute
 
+// DefaultFinalizerVerificationTimeout is the total deadline for the KafkaTopic
+// finalizer's final mirror verification when
+// KafkaTopicReconciler.FinalizerVerificationTimeout is zero.
+const DefaultFinalizerVerificationTimeout = 5 * time.Second
+
 // KafkaMirrorTopicReconciler reconciles a KafkaMirrorTopic: a destination
 // topic created and kept healthy as a cluster-link mirror through the Kafka
 // REST API. Unlike the other topic-owning kinds it manages NO finalizer:

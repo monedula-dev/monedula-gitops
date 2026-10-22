@@ -17,15 +17,17 @@ func TestOperatorCmdFlagDefaults(t *testing.T) {
 	require.Equal(t, "operator", cmd.Name())
 
 	cases := map[string]string{
-		"metrics-bind-address":      ":8080",
-		"metrics-secure":            "false",
-		"health-probe-bind-address": ":8081",
-		"leader-elect":              "false",
-		"cluster-namespace":         "",
-		"enable-webhooks":           "false",
-		"webhook-cert-dir":          "",
-		"resync-interval":           "5m0s",
-		"max-concurrent-reconciles": "1",
+		"metrics-bind-address":           ":8080",
+		"metrics-secure":                 "false",
+		"health-probe-bind-address":      ":8081",
+		"leader-elect":                   "false",
+		"cluster-namespace":              "",
+		"enable-webhooks":                "false",
+		"webhook-cert-dir":               "",
+		"resync-interval":                "5m0s",
+		"max-concurrent-reconciles":      "1",
+		"mirror-stall-threshold":         "30m0s",
+		"finalizer-verification-timeout": "5s",
 	}
 	for name, want := range cases {
 		f := cmd.Flags().Lookup(name)
