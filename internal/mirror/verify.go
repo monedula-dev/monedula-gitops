@@ -18,9 +18,8 @@ import (
 func VerifyTopic(ctx context.Context, k kafka.AdminClient, r kafkarest.Client, topic string) (Classification, error) {
 	aid, aerr := k.ClusterID(ctx)
 	rid, rerr := r.ClusterID(ctx)
-	if aerr != nil || rerr != nil {
-		return Unknown, fmt.Errorf("%w: kafka admin cluster id %q (err: %v), rest cluster id %q (err: %v)",
-			ErrClusterIdentityMismatch, aid, aerr, rid, rerr)
+	if err := bindClusterIDs(aid, aerr, rid, rerr); err != nil {
+		return Unknown, err
 	}
 	t, err := k.GetTopic(ctx, topic)
 	if err != nil {

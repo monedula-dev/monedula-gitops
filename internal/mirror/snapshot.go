@@ -48,9 +48,8 @@ type Snapshot struct {
 // identity rules as ReadSnapshot's success path. Nil maps become empty.
 func NewSnapshot(adminClusterID, restClusterID string, topics map[string]kafka.TopicState, mirrors map[string]kafkarest.Mirror, links map[string]LinkInfo) Snapshot {
 	s := Snapshot{AdminClusterID: adminClusterID, RESTClusterID: restClusterID}
-	if adminClusterID == "" || restClusterID == "" || adminClusterID != restClusterID {
-		s.Err = fmt.Errorf("%w: kafka admin cluster id %q, rest cluster id %q",
-			ErrClusterIdentityMismatch, adminClusterID, restClusterID)
+	if err := bindClusterIDs(adminClusterID, nil, restClusterID, nil); err != nil {
+		s.Err = err
 		return s
 	}
 	if topics == nil {
@@ -77,9 +76,8 @@ func ReadSnapshot(ctx context.Context, k kafka.AdminClient, r kafkarest.Client, 
 	aid, aerr := k.ClusterID(ctx)
 	rid, rerr := r.ClusterID(ctx)
 	s.AdminClusterID, s.RESTClusterID = aid, rid
-	if aerr != nil || rerr != nil || aid == "" || rid == "" || aid != rid {
-		s.Err = fmt.Errorf("%w: kafka admin cluster id %q (err: %v), rest cluster id %q (err: %v)",
-			ErrClusterIdentityMismatch, aid, aerr, rid, rerr)
+	if err := bindClusterIDs(aid, aerr, rid, rerr); err != nil {
+		s.Err = err
 		return s
 	}
 	topics, err := k.ListTopics(ctx)
@@ -124,6 +122,17 @@ func ReadSnapshot(ctx context.Context, k kafka.AdminClient, r kafkarest.Client, 
 		lm[n] = LinkInfo{Link: l, Configs: cfg, ConfigErr: cerr}
 	}
 	return NewSnapshot(aid, rid, tm, mm, lm)
+}
+
+// bindClusterIDs is the single cluster-identity binding rule: both IDs read
+// without error, non-empty and equal. Otherwise it returns an error wrapping
+// ErrClusterIdentityMismatch.
+func bindClusterIDs(adminID string, adminErr error, restID string, restErr error) error {
+	if adminErr == nil && restErr == nil && adminID != "" && restID != "" && adminID == restID {
+		return nil
+	}
+	return fmt.Errorf("%w: kafka admin cluster id %q (err: %v), rest cluster id %q (err: %v)",
+		ErrClusterIdentityMismatch, adminID, adminErr, restID, restErr)
 }
 
 // indexMirrors keys a complete ListMirrors result by mirror topic name. A

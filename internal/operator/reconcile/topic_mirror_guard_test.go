@@ -154,3 +154,21 @@ func TestReconcileTopicLiveMirrorSkipsRoleBindings(t *testing.T) {
 		}
 	}
 }
+
+// Prune consent does not reach a guarded mirror topic: its stale literal ACL
+// stays in place.
+func TestReconcileTopicLiveMirrorNoPrune(t *testing.T) {
+	tp, k := pruneTopicFixture(true)
+	k.SetClusterID("lkc-1")
+	r := restmock.New("lkc-1")
+	r.AddMirror(kafkarest.Mirror{LinkName: "link-a", MirrorTopicName: "payments.orders", Status: "ACTIVE"})
+
+	if _, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil, r); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, c := range k.Calls() {
+		if strings.HasPrefix(c, "DeleteACLs") || strings.HasPrefix(c, "CreateACLs") {
+			t.Fatalf("ACLs mutated on a live mirror topic: %v", k.Calls())
+		}
+	}
+}

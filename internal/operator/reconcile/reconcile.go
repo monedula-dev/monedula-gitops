@@ -257,10 +257,14 @@ func BuildClusterACLView(topics []*v1alpha1.KafkaTopic, policies []*v1alpha1.Kaf
 // view keeps the per-resource (CLI single-resource) prune semantics.
 //
 // rest, when non-nil (the cluster has spec.rest), enables the mirror guard: the
-// mirror snapshot is read before planning, a live or stopping mirror topic is
-// Rejected (no topic, ACL, schema or role-binding mutation), and unreadable
-// mirror state fails closed in every mode (StateReadError: not Ready, non-nil
-// error, nothing applied). A nil rest keeps the legacy behavior unchanged.
+// mirror snapshot is read before planning. For a live or stopping mirror topic
+// the diff replaces the topic's create/config/partition/RF ops with one
+// Rejected finding and drops its schema ops and its CreateAcl and DeleteAcl
+// (prune) ops on the literal topic resource; prefixed/wildcard and non-topic
+// ACLs are kept. The RBAC role-binding step is skipped for that topic.
+// Unreadable mirror state fails closed in every mode (StateReadError: not
+// Ready, non-nil error, nothing applied). A nil rest keeps the legacy behavior
+// unchanged.
 func ReconcileTopic(ctx context.Context, topic *v1alpha1.KafkaTopic, cluster *v1alpha1.KafkaCluster,
 	k kafka.AdminClient, sr schemaregistry.Client, r secrets.Resolver, view *ClusterACLView,
 	mdsClient mds.Client, rbView *ClusterRoleBindingView, rest kafkarest.Client) (v1alpha1.KafkaTopicStatus, error) {
