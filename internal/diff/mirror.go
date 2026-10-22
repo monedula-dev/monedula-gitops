@@ -73,7 +73,7 @@ func mirrorOpsFor(dm DesiredMirror, s *mirror.Snapshot) []operations.Operation {
 	class := s.Classify(dm.TopicName)
 	switch class {
 	case mirror.Absent:
-		if link.Link.State != "ACTIVE" {
+		if !mirror.LinkActive(link) {
 			return one(operations.Rejected, "link %q is %s; not creating mirror", dm.LinkName, link.Link.State)
 		}
 		var rejected []operations.Operation
@@ -88,11 +88,14 @@ func mirrorOpsFor(dm DesiredMirror, s *mirror.Snapshot) []operations.Operation {
 			return rejected
 		}
 		op := newMirrorOp(dm, operations.CreateMirrorTopic, "")
-		op.MirrorLink = dm.LinkName
-		op.MirrorSource = dm.SourceTopicName
-		op.MirrorNameExplicit = dm.TopicNameExplicit
+		setMirrorIdentity(&op, dm)
 		op.ReplicationFactor = dm.ReplicationFactor
-		op.Config = dm.Config
+		if dm.Config != nil {
+			op.Config = make(map[string]string, len(dm.Config))
+			for k, v := range dm.Config {
+				op.Config[k] = v
+			}
+		}
 		return []operations.Operation{op}
 	case mirror.Normal:
 		return one(operations.Rejected, "topic exists and is not a mirror")
@@ -143,26 +146,36 @@ func mirrorOpsFor(dm DesiredMirror, s *mirror.Snapshot) []operations.Operation {
 	for _, k := range keys {
 		want := dm.Config[k]
 		got, present := lt.Config[k]
+		// A link-managed or undeterminable key is never declarable on a
+		// mirror, whether or not its live value currently matches.
+		if msg := linkManagedRejection(link, k); msg != "" {
+			op := newMirrorOp(dm, operations.Rejected, msg)
+			op.Field, op.From, op.To = k, got, want
+			ops = append(ops, op)
+			continue
+		}
 		if present && got == want {
 			continue
 		}
 		// From is "" when the key is absent live, like UpdateTopicConfig.
-		from := got
 		shown := got
 		if !present {
 			shown = "<unset>"
 		}
-		if msg := linkManagedRejection(link, k); msg != "" {
-			op := newMirrorOp(dm, operations.Rejected, msg)
-			op.Field, op.From, op.To = k, from, want
-			ops = append(ops, op)
-			continue
-		}
 		op := newMirrorOp(dm, operations.UpdateMirrorTopicConfig, fmt.Sprintf("config %s: %s -> %s", k, shown, want))
-		op.Field, op.From, op.To = k, from, want
+		setMirrorIdentity(&op, dm)
+		op.Field, op.From, op.To = k, got, want
 		ops = append(ops, op)
 	}
 	return ops
+}
+
+// setMirrorIdentity stamps the mirror identity payload the writer re-verifies
+// (link, source, and whether topicName was explicit for CheckPrefix).
+func setMirrorIdentity(op *operations.Operation, dm DesiredMirror) {
+	op.MirrorLink = dm.LinkName
+	op.MirrorSource = dm.SourceTopicName
+	op.MirrorNameExplicit = dm.TopicNameExplicit
 }
 
 // linkManagedRejection returns the Rejected message for a declared config key

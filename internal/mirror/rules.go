@@ -31,6 +31,10 @@ func CheckPrefix(l LinkInfo, topicName, sourceTopicName string, explicit bool) e
 	return nil
 }
 
+// LinkActive reports whether the link is in a state that allows creating
+// mirror topics on it (link_state ACTIVE).
+func LinkActive(l LinkInfo) bool { return l.Link.State == "ACTIVE" }
+
 // LinkManaged reports whether a topic config key is synced from the source by
 // the link (topic.config.sync.include, exact entry or prefix entry ending in
 // "*"). known is false when the link does not report the setting, or reports

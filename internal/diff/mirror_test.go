@@ -199,6 +199,9 @@ func TestComputeMirrorOpsDecisionTable(t *testing.T) {
 				require.Equal(t, "retention.ms", ops[0].Field)
 				require.Equal(t, "500", ops[0].From)
 				require.Equal(t, "1000", ops[0].To)
+				require.Equal(t, mtLink, ops[0].MirrorLink)
+				require.Equal(t, mtSource, ops[0].MirrorSource)
+				require.False(t, ops[0].MirrorNameExplicit)
 			},
 		},
 		{
@@ -209,7 +212,7 @@ func TestComputeMirrorOpsDecisionTable(t *testing.T) {
 			want: []want{{operations.Rejected, "cleanup.policy"}},
 		},
 		{
-			name: "healthy mirror in sync",
+			name: "link-managed key matching live is still rejected",
 			dm: func(dm *DesiredMirror) {
 				dm.ReplicationFactor = 3
 				dm.Config = map[string]string{"retention.ms": "1000", "cleanup.policy": "delete"}
@@ -217,7 +220,61 @@ func TestComputeMirrorOpsDecisionTable(t *testing.T) {
 			snap: snapPtr(mirror.NewSnapshot("c1", "c1",
 				liveMirrorTopic(mtSource, 3, map[string]string{"retention.ms": "1000", "cleanup.policy": "delete"}),
 				liveMirror(mtLink, mtSource, mtSource, "ACTIVE"), activeLink(nil))),
+			want: []want{{operations.Rejected, "cleanup.policy"}},
+			check: func(t *testing.T, ops []operations.Operation) {
+				require.Equal(t, "cleanup.policy", ops[0].Field)
+			},
+		},
+		{
+			name: "undeterminable key matching live is still rejected",
+			dm:   func(dm *DesiredMirror) { dm.Config = map[string]string{"retention.ms": "1000"} },
+			snap: snapPtr(mirror.NewSnapshot("c1", "c1",
+				liveMirrorTopic(mtSource, 3, map[string]string{"retention.ms": "1000"}),
+				liveMirror(mtLink, mtSource, mtSource, "ACTIVE"), activeLink(map[string]string{}))),
+			want: []want{{operations.Rejected, "cannot determine whether retention.ms is link-managed"}},
+		},
+		{
+			name: "healthy mirror in sync with local keys only",
+			dm: func(dm *DesiredMirror) {
+				dm.ReplicationFactor = 3
+				dm.Config = map[string]string{"retention.ms": "1000"}
+			},
+			snap: snapPtr(mirror.NewSnapshot("c1", "c1",
+				liveMirrorTopic(mtSource, 3, map[string]string{"retention.ms": "1000", "cleanup.policy": "delete"}),
+				liveMirror(mtLink, mtSource, mtSource, "ACTIVE"), activeLink(nil))),
 			want: nil,
+		},
+		{
+			name: "zero-value snapshot",
+			snap: &mirror.Snapshot{},
+			want: []want{{operations.StateReadError, ""}},
+		},
+		{
+			name: "unrecognized status with topic present",
+			snap: snapPtr(mirror.NewSnapshot("c1", "c1", liveMirrorTopic(mtSource, 3, nil),
+				liveMirror(mtLink, mtSource, mtSource, "PENDING_SOMETHING_NEW"), activeLink(nil))),
+			want: []want{{operations.StateReadError, "PENDING_SOMETHING_NEW"}},
+		},
+		{
+			name: "unhealthy mirror with RF and config drift",
+			dm: func(dm *DesiredMirror) {
+				dm.ReplicationFactor = 4
+				dm.Config = map[string]string{"retention.ms": "1000"}
+			},
+			snap: snapPtr(mirror.NewSnapshot("c1", "c1", liveMirrorTopic(mtSource, 3, map[string]string{"retention.ms": "500"}),
+				liveMirror(mtLink, mtSource, mtSource, "PAUSED"), activeLink(nil))),
+			want: []want{
+				{operations.MirrorTopicUnhealthy, "PAUSED"},
+				{operations.UnsupportedReplicationFactorChange, ""},
+				{operations.UpdateMirrorTopicConfig, ""},
+			},
+		},
+		{
+			name: "stopping mirror with config drift",
+			dm:   func(dm *DesiredMirror) { dm.Config = map[string]string{"retention.ms": "1000"} },
+			snap: snapPtr(mirror.NewSnapshot("c1", "c1", liveMirrorTopic(mtSource, 3, map[string]string{"retention.ms": "500"}),
+				liveMirror(mtLink, mtSource, mtSource, "PENDING_STOPPED"), activeLink(nil))),
+			want: []want{{operations.MirrorTopicStopping, ""}},
 		},
 	}
 	for _, tc := range cases {
@@ -322,6 +379,22 @@ func TestMirrorConfigUndeterminable(t *testing.T) {
 			require.Contains(t, ops[0].Message, "cannot determine whether retention.ms is link-managed")
 		})
 	}
+}
+
+func TestCreateMirrorTopicCopiesConfig(t *testing.T) {
+	dm := baseDesiredMirror()
+	dm.Config = map[string]string{"retention.ms": "1000"}
+	s := mirror.NewSnapshot("c1", "c1", nil, nil, activeLink(nil))
+	ops := computeMirrorOps(Desired{Mirrors: []DesiredMirror{dm}}, Live{Mirrors: &s})
+	require.Equal(t, []operations.Action{operations.CreateMirrorTopic}, mirrorActions(ops))
+	ops[0].Config["retention.ms"] = "2"
+	require.Equal(t, "1000", dm.Config["retention.ms"])
+}
+
+func TestLinkActive(t *testing.T) {
+	require.True(t, mirror.LinkActive(mirror.LinkInfo{Link: kafkarest.Link{State: "ACTIVE"}}))
+	require.False(t, mirror.LinkActive(mirror.LinkInfo{Link: kafkarest.Link{State: "PAUSED"}}))
+	require.False(t, mirror.LinkActive(mirror.LinkInfo{}))
 }
 
 func TestMirrorOpsCarryMode(t *testing.T) {
