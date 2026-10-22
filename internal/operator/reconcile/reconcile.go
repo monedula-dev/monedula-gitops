@@ -130,6 +130,11 @@ const (
 	// reasonSchemaRegistryOK is set on CondSchemaRegistryDegraded=False when the
 	// fetch succeeded (schemas are in play and the global level was read).
 	reasonSchemaRegistryOK = "GlobalCompatibilityRead"
+	// reasonRESTNotConfigured is set on ValidationFailed=True when a
+	// KafkaMirrorTopic references a KafkaCluster without spec.rest. TERMINAL:
+	// mirror state cannot be read or written until the cluster declares a
+	// Kafka REST endpoint (the cluster watch re-triggers the reconcile).
+	reasonRESTNotConfigured = "RESTNotConfigured"
 )
 
 // Kind label values for monedula_reconcile_terminal_total (v0.36 Task 7).
@@ -145,6 +150,7 @@ const (
 	kindKafkaQuota        = "kafkaquota"
 	kindKafkaRoleBinding  = "kafkarolebinding"
 	kindKafkaUser         = "kafkauser"
+	kindKafkaMirrorTopic  = "kafkamirrortopic"
 )
 
 // Subject names follow spec.schema.subjectStrategy (spec §11) and are computed
@@ -1044,6 +1050,10 @@ type driftTarget struct {
 }
 
 func topicTarget(st *v1alpha1.KafkaTopicStatus) driftTarget {
+	return driftTarget{conds: &st.Conditions, drift: &st.Drift, setPhase: func(p string) { st.Phase = p }}
+}
+
+func mirrorTarget(st *v1alpha1.KafkaMirrorTopicStatus) driftTarget {
 	return driftTarget{conds: &st.Conditions, drift: &st.Drift, setPhase: func(p string) { st.Phase = p }}
 }
 

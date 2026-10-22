@@ -89,6 +89,9 @@ const (
 	// (promoted/failed over); it is now a normal topic.
 	// MirrorTopicProgressing: the mirror is still being set up or restored
 	// (informational, see Informational).
+	// MirrorTopicStalled: a progressing mirror has kept the same transitional
+	// status past the operator's stall threshold (operator only; the CLI has
+	// no durable state to measure the duration).
 	// UnsupportedReplicationFactorChange: the declared replicationFactor
 	// differs from the live mirror's (create-time only).
 	// StateReadError: live mirror state could not be read or classified
@@ -97,6 +100,7 @@ const (
 	MirrorTopicStopping                Action = "MirrorTopicStopping"
 	MirrorTopicPromoted                Action = "MirrorTopicPromoted"
 	MirrorTopicProgressing             Action = "MirrorTopicProgressing"
+	MirrorTopicStalled                 Action = "MirrorTopicStalled"
 	UnsupportedReplicationFactorChange Action = "UnsupportedReplicationFactorChange"
 	StateReadError                     Action = "StateReadError"
 )
