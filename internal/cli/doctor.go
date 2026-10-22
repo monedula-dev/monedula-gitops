@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -10,6 +11,7 @@ import (
 
 	"github.com/monedula-dev/monedula-gitops/internal/api/v1alpha1"
 	"github.com/monedula-dev/monedula-gitops/internal/defaulting"
+	"github.com/monedula-dev/monedula-gitops/internal/kafka"
 	"github.com/monedula-dev/monedula-gitops/internal/loader"
 	"github.com/monedula-dev/monedula-gitops/internal/mds"
 	"github.com/monedula-dev/monedula-gitops/internal/pipeline"
@@ -29,12 +31,15 @@ const (
 	doctorPass = "pass"
 	doctorFail = "fail"
 	doctorSkip = "skip"
+	// doctorWarn flags a condition worth attention that does not make the run
+	// unhealthy.
+	doctorWarn = "warn"
 )
 
 // doctorCheck is one connectivity/readiness probe result.
 type doctorCheck struct {
 	Name    string `json:"name"`
-	Status  string `json:"status"` // pass | fail | skip
+	Status  string `json:"status"` // pass | fail | skip | warn
 	Message string `json:"message"`
 }
 
@@ -191,6 +196,11 @@ func runDoctor(cmd *cobra.Command, f *doctorFlags) error {
 		add("schema-registry", doctorPass, fmt.Sprintf("%d subject(s)", len(subjects)))
 	}
 
+	// rest / rest-cluster-binding / rest-mirrors / link:<name>: Kafka REST
+	// (mirror topics). Skipped when spec.rest is not configured. All checks run
+	// even when an earlier one fails.
+	doctorREST(ctx, plan, f.clusterConfigFiles, cl, client, add)
+
 	// 3. Render and map health to the exit code (0 healthy, 2 problems).
 	rendered, err := renderDoctor(out, f.output)
 	if err != nil {
@@ -260,6 +270,8 @@ func renderDoctorHuman(out doctorOutput) []byte {
 			failed++
 		case doctorSkip:
 			label = "SKIP"
+		case doctorWarn:
+			label = "WARN"
 		}
 		fmt.Fprintf(&buf, "%s %s: %s\n", label, c.Name, c.Message)
 	}
@@ -269,4 +281,83 @@ func renderDoctorHuman(out doctorOutput) []byte {
 		fmt.Fprintf(&buf, "Doctor: %d check(s) failed\n", failed)
 	}
 	return buf.Bytes()
+}
+
+// doctorREST runs the Kafka REST checks (read-only). kafkaClient may be nil when
+// the Kafka client could not be built; the binding check then fails.
+func doctorREST(ctx context.Context, plan *pipeline.Plan, files []string, cl *v1alpha1.KafkaCluster,
+	kafkaClient kafka.AdminClient, add func(name, status, msg string)) {
+	if cl.Spec.REST == nil && cl.Annotations[mockRESTAnnotation] == "" {
+		add("rest", doctorSkip, "Kafka REST not configured; mirror topics unavailable and KafkaTopic cannot detect out-of-band mirrors")
+		return
+	}
+	rc, err := buildRESTClient(plan, files)
+	if err != nil || rc == nil {
+		msg := "Kafka REST client unavailable"
+		if err != nil {
+			msg = err.Error()
+		}
+		add("rest", doctorFail, msg)
+		add("rest-cluster-binding", doctorFail, "not run: Kafka REST client unavailable")
+		add("rest-mirrors", doctorFail, "not run: Kafka REST client unavailable")
+		add("links", doctorFail, "not run: Kafka REST client unavailable")
+		return
+	}
+
+	restID, restErr := rc.ClusterID(ctx)
+	if restErr != nil {
+		add("rest", doctorFail, restErr.Error())
+	} else {
+		add("rest", doctorPass, restID)
+	}
+
+	switch {
+	case kafkaClient == nil:
+		add("rest-cluster-binding", doctorFail, "not run: Kafka client unavailable")
+	case restErr != nil:
+		add("rest-cluster-binding", doctorFail, "not run: Kafka REST cluster ID unavailable")
+	default:
+		kafkaID, err := kafkaClient.ClusterID(ctx)
+		switch {
+		case err != nil:
+			add("rest-cluster-binding", doctorFail, err.Error())
+		case kafkaID == "" || restID == "" || kafkaID != restID:
+			add("rest-cluster-binding", doctorFail, fmt.Sprintf("ClusterIdentityMismatch: kafka=%s rest=%s", kafkaID, restID))
+		default:
+			add("rest-cluster-binding", doctorPass, fmt.Sprintf("kafka=%s rest=%s", kafkaID, restID))
+		}
+	}
+
+	if mirrors, err := rc.ListMirrors(ctx); err != nil {
+		add("rest-mirrors", doctorFail, err.Error())
+	} else {
+		add("rest-mirrors", doctorPass, fmt.Sprintf("%d mirror topics (read-only checks; create/alter permissions not tested)", len(mirrors)))
+	}
+
+	links, err := rc.ListLinks(ctx)
+	if err != nil {
+		add("links", doctorFail, err.Error())
+		return
+	}
+	for _, l := range links {
+		name := "link:" + l.Name
+		cfg, err := rc.LinkConfigs(ctx, l.Name)
+		if err != nil {
+			add(name, doctorFail, fmt.Sprintf("state=%s; link configs unreadable: %v", l.State, err))
+			continue
+		}
+		prefix := cfg["cluster.link.prefix"]
+		if prefix == "" {
+			prefix = "none"
+		}
+		msg := fmt.Sprintf("state=%s prefix=%s", l.State, prefix)
+		switch {
+		case l.State != "ACTIVE":
+			add(name, doctorFail, msg)
+		case cfg["auto.create.mirror.topics.enable"] == "true":
+			add(name, doctorWarn, msg+" (auto.create.mirror.topics.enable=true; mirrors may be created outside Git)")
+		default:
+			add(name, doctorPass, msg)
+		}
+	}
 }

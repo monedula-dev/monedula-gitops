@@ -759,3 +759,9 @@ func TestApplyNoLockoutWarningWithoutAuth(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, stderr, "warning:")
 }
+
+func TestValidateCountsMirrorTopics(t *testing.T) {
+	out, err := run(t, "validate", "-f", "testdata/mirror/create", "-c", "testdata/clusters/mirror-cluster.yaml")
+	require.NoError(t, err)
+	require.Contains(t, out, "1 resource(s) valid")
+}

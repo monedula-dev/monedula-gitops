@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **KafkaMirrorTopic (CLI):** declarative Confluent mirror topics. `validate`, `diff`, `apply`,
+  `verify`, and `import` handle the new `KafkaMirrorTopic` kind (create and alter only; mirrors are
+  never deleted or promoted), `KafkaTopic` is guarded against live mirrors, and `doctor` checks
+  Kafka REST reachability, cluster-ID binding, mirror listing, and cluster-link state. The
+  `KafkaCluster` spec gains an optional `rest` block (Kafka REST v3 endpoint, auth, TLS).
+
 ## [1.0.0] - 2026-10-09
 
 First stable release. Since 0.1.0 it updates dependencies, backs the documented support matrix
