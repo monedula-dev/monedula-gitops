@@ -101,13 +101,10 @@ func ReadSnapshot(ctx context.Context, k kafka.AdminClient, r kafkarest.Client, 
 	for _, t := range topics {
 		tm[t.Name] = t
 	}
-	mm := make(map[string]kafkarest.Mirror, len(mirrors))
-	for _, m := range mirrors {
-		if _, dup := mm[m.MirrorTopicName]; dup {
-			s.Err = fmt.Errorf("duplicate mirror topic name %q in REST response", m.MirrorTopicName)
-			return s
-		}
-		mm[m.MirrorTopicName] = m
+	mm, err := indexMirrors(mirrors)
+	if err != nil {
+		s.Err = err
+		return s
 	}
 	byName := make(map[string]kafkarest.Link, len(links))
 	for _, l := range links {
@@ -127,6 +124,19 @@ func ReadSnapshot(ctx context.Context, k kafka.AdminClient, r kafkarest.Client, 
 		lm[n] = LinkInfo{Link: l, Configs: cfg, ConfigErr: cerr}
 	}
 	return NewSnapshot(aid, rid, tm, mm, lm)
+}
+
+// indexMirrors keys a complete ListMirrors result by mirror topic name. A
+// duplicate name is contradictory evidence and fails the whole read.
+func indexMirrors(mirrors []kafkarest.Mirror) (map[string]kafkarest.Mirror, error) {
+	mm := make(map[string]kafkarest.Mirror, len(mirrors))
+	for _, m := range mirrors {
+		if _, dup := mm[m.MirrorTopicName]; dup {
+			return nil, fmt.Errorf("duplicate mirror topic name %q in REST response", m.MirrorTopicName)
+		}
+		mm[m.MirrorTopicName] = m
+	}
+	return mm, nil
 }
 
 // Classify returns the ownership class of a destination topic name.

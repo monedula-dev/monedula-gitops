@@ -48,7 +48,7 @@ func TestReconcileTopicSchemaRegistryDegradedOnFetchFailure(t *testing.T) {
 	sr := &globalCompatFailClient{Client: schemamock.New(), err: errors.New("registry unreachable")}
 	tp := schemaTopic()
 
-	st, err := ReconcileTopic(context.Background(), tp, srConfiguredCluster(), k, sr, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, srConfiguredCluster(), k, sr, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("a degraded SR fetch must not fail the reconcile, got: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestReconcileTopicSchemaRegistryDegradedClearedOnSuccess(t *testing.T) {
 	tp := schemaTopic()
 	tp.Spec.Schema.Compatibility = "BACKWARD" // matches global; no gated Lower involved
 
-	st, err := ReconcileTopic(context.Background(), tp, srConfiguredCluster(), k, sr, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, srConfiguredCluster(), k, sr, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestReconcileTopicSchemaRegistryDegradedAbsentWithoutSchema(t *testing.T) {
 	k := kafkamock.New(nil, nil)
 	tp := baseTopic("Enforce") // no spec.Schema
 
-	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestReconcileTopicSchemaRegistryDegradedAbsentOnResolveFailure(t *testing.T
 	}
 
 	st, err := ReconcileTopic(context.Background(), tp, srConfiguredCluster(), k, sr,
-		stubResolver{err: errors.New("file refs unsupported in operator mode")}, nil, nil, nil)
+		stubResolver{err: errors.New("file refs unsupported in operator mode")}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("schema-resolve failure is terminal, want nil error, got: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestReconcileTopicSchemaRegistryDegradedReflectsPreApplyFetch(t *testing.T)
 	sr.SetGlobalCompatibility("BACKWARD") // what the (successful) re-observe would read
 	tp := schemaTopic()                   // Enforce, governance-mode NONE compatibility (first-time set)
 
-	st, err := ReconcileTopic(context.Background(), tp, srConfiguredCluster(), k, sr, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, srConfiguredCluster(), k, sr, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("a degraded SR fetch must not fail the reconcile, got: %v", err)
 	}

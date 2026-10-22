@@ -207,6 +207,22 @@ func (r *KafkaTopicReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return r.handleDeletionWithClient(ctx, &topic, k, sr, resolver, &cluster, clusterNS)
 	}
 
+	// Kafka REST client for the mirror guard; nil when the cluster has no
+	// spec.rest (legacy behavior). A build failure is transient and happens
+	// before any Kafka mutation.
+	rest, rberr := r.Clients.RESTFor(ctx, &cluster)
+	if rberr != nil {
+		logger.Error(rberr, "building cluster REST client")
+		r.event(&topic, corev1.EventTypeWarning, "ClientsBuildFailed", rberr.Error())
+		if uerr := updateStatus(ctx, r.Client, req.NamespacedName, &topic, func() {
+			st := topicErrorStatus(&topic, "ClientsBuildFailed", rberr.Error())
+			topic.Status = &st
+		}); uerr != nil {
+			return ctrl.Result{}, errors.Join(rberr, uerr)
+		}
+		return ctrl.Result{}, rberr
+	}
+
 	// Not being deleted: ensure the finalizer is present before mutating Kafka,
 	// so an interrupted reconcile still leaves cleanup possible.
 	if !controllerutil.ContainsFinalizer(&topic, FinalizerName) {
@@ -306,7 +322,7 @@ func (r *KafkaTopicReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// LastTransitionTime preservation) reads the status of the object fetched at
 	// the top of this Reconcile, as it always has.
 	resolver := &operator.K8sResolver{Client: r.Client, Namespace: topic.Namespace, Ctx: ctx}
-	st, rerr := reconcile.ReconcileTopic(ctx, &topic, &cluster, k, sr, resolver, view, mdsClient, rbView)
+	st, rerr := reconcile.ReconcileTopic(ctx, &topic, &cluster, k, sr, resolver, view, mdsClient, rbView, rest)
 	// Substrate mutations are done: release the locks before the status write
 	// below (which may retry on conflict) so other writers on this cluster
 	// are not held up by API-server latency. Reverse acquisition order:
