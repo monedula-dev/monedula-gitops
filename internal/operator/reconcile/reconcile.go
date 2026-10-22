@@ -71,7 +71,6 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/diff"
 	"github.com/monedula-dev/monedula-gitops/internal/executor"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
-	"github.com/monedula-dev/monedula-gitops/internal/kafkarest"
 	"github.com/monedula-dev/monedula-gitops/internal/mds"
 	"github.com/monedula-dev/monedula-gitops/internal/mirror"
 	"github.com/monedula-dev/monedula-gitops/internal/operations"
@@ -256,18 +255,19 @@ func BuildClusterACLView(topics []*v1alpha1.KafkaTopic, policies []*v1alpha1.Kaf
 // (spec §20.1); it governs prune computation only — see ClusterACLView. A nil
 // view keeps the per-resource (CLI single-resource) prune semantics.
 //
-// rest, when non-nil (the cluster has spec.rest), enables the mirror guard: the
-// mirror snapshot is read before planning. For a live or stopping mirror topic
+// mirrors, when non-nil (the cluster has spec.rest), enables the mirror guard:
+// it is the caller's mirror snapshot for this topic (mirror.ReadTopicSnapshot,
+// read before any substrate lock is taken). For a live or stopping mirror topic
 // the diff replaces the topic's create/config/partition/RF ops with one
 // Rejected finding and drops its schema ops and its CreateAcl and DeleteAcl
 // (prune) ops on the literal topic resource; prefixed/wildcard and non-topic
 // ACLs are kept. The RBAC role-binding step is skipped for that topic.
 // Unreadable mirror state fails closed in every mode (StateReadError: not
-// Ready, non-nil error, nothing applied). A nil rest keeps the legacy behavior
-// unchanged.
+// Ready, non-nil error, nothing applied). A nil mirrors keeps the legacy
+// behavior unchanged.
 func ReconcileTopic(ctx context.Context, topic *v1alpha1.KafkaTopic, cluster *v1alpha1.KafkaCluster,
 	k kafka.AdminClient, sr schemaregistry.Client, r secrets.Resolver, view *ClusterACLView,
-	mdsClient mds.Client, rbView *ClusterRoleBindingView, rest kafkarest.Client) (v1alpha1.KafkaTopicStatus, error) {
+	mdsClient mds.Client, rbView *ClusterRoleBindingView, mirrors *mirror.Snapshot) (v1alpha1.KafkaTopicStatus, error) {
 
 	now := metav1.Now()
 	st := v1alpha1.KafkaTopicStatus{ObservedGeneration: topic.Generation, LastCheckedTime: &now}
@@ -405,12 +405,9 @@ func ReconcileTopic(ctx context.Context, topic *v1alpha1.KafkaTopic, cluster *v1
 	// classification.
 	globalCompatibilityErr := live.GlobalCompatibilityErr
 
-	// Mirror guard: only clusters with Kafka REST read mirror state. The
-	// snapshot is not re-read after apply; the guard decision is per pass.
-	if rest != nil {
-		snap := mirror.ReadSnapshot(ctx, k, rest, nil)
-		live.Mirrors = &snap
-	}
+	// Mirror guard: only clusters with Kafka REST carry a mirror snapshot. It
+	// is not re-read after apply; the guard decision is per pass.
+	live.Mirrors = mirrors
 
 	d := diff.Desired{
 		Topics:  []diff.DesiredTopic{desiredTopic},

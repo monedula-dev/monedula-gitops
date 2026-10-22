@@ -230,6 +230,18 @@ func (r *KafkaTopicReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
+	// Mirror guard input (clusters with spec.rest only): classify just this
+	// topic — cluster IDs, GetTopic and the full mirror list, never the whole
+	// topic list — under the identity lock but BEFORE the substrate locks, so
+	// REST latency never holds up other writers on this cluster's ACLs. A
+	// failed read is carried in the snapshot and fails the reconcile closed
+	// in the engine.
+	var mirrors *mirror.Snapshot
+	if rest != nil {
+		snap := mirror.ReadTopicSnapshot(ctx, k, rest, operatorwebhook.ResolvedTopicName(&topic))
+		mirrors = &snap
+	}
+
 	// Serialize this reconcile's substrate read-compute-write span against
 	// every other writer on the same cluster's substrates (locks.go): the
 	// sibling-CR view builds below, the engine's live broker/MDS reads, and
@@ -320,7 +332,7 @@ func (r *KafkaTopicReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// LastTransitionTime preservation) reads the status of the object fetched at
 	// the top of this Reconcile, as it always has.
 	resolver := &operator.K8sResolver{Client: r.Client, Namespace: topic.Namespace, Ctx: ctx}
-	st, rerr := reconcile.ReconcileTopic(ctx, &topic, &cluster, k, sr, resolver, view, mdsClient, rbView, rest)
+	st, rerr := reconcile.ReconcileTopic(ctx, &topic, &cluster, k, sr, resolver, view, mdsClient, rbView, mirrors)
 	// Substrate mutations are done: release the locks before the status write
 	// below (which may retry on conflict) so other writers on this cluster
 	// are not held up by API-server latency. Reverse acquisition order:

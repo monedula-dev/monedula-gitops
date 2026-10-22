@@ -131,8 +131,17 @@ func bindClusterIDs(adminID string, adminErr error, restID string, restErr error
 	if adminErr == nil && restErr == nil && adminID != "" && restID != "" && adminID == restID {
 		return nil
 	}
-	return fmt.Errorf("%w: kafka admin cluster id %q (err: %v), rest cluster id %q (err: %v)",
-		ErrClusterIdentityMismatch, adminID, adminErr, restID, restErr)
+	return fmt.Errorf("%w: kafka admin cluster id %q%s, rest cluster id %q%s",
+		ErrClusterIdentityMismatch, adminID, errSuffix(adminErr), restID, errSuffix(restErr))
+}
+
+// errSuffix renders a read error for the binding message, or nothing when the
+// read succeeded.
+func errSuffix(err error) string {
+	if err == nil {
+		return ""
+	}
+	return fmt.Sprintf(" (err: %v)", err)
 }
 
 // indexMirrors keys a complete ListMirrors result by mirror topic name. A

@@ -14,6 +14,7 @@ import (
 	kafkamock "github.com/monedula-dev/monedula-gitops/internal/kafka/mock"
 	"github.com/monedula-dev/monedula-gitops/internal/kafkarest"
 	restmock "github.com/monedula-dev/monedula-gitops/internal/kafkarest/mock"
+	"github.com/monedula-dev/monedula-gitops/internal/mirror"
 	mdsmock "github.com/monedula-dev/monedula-gitops/internal/mds/mock"
 )
 
@@ -29,6 +30,13 @@ func guardLiveTopic() []kafka.TopicState {
 	return []kafka.TopicState{{Name: "orders", Partitions: 3, Config: map[string]string{"retention.ms": "1000"}}}
 }
 
+// topicSnap reads the targeted mirror snapshot the controller passes to
+// ReconcileTopic on a REST-configured cluster.
+func topicSnap(k kafka.AdminClient, r kafkarest.Client, topic string) *mirror.Snapshot {
+	s := mirror.ReadTopicSnapshot(context.Background(), k, r, topic)
+	return &s
+}
+
 func guardKafka(topics []kafka.TopicState) *kafkamock.Client {
 	k := kafkamock.New(topics, nil)
 	k.SetClusterID("lkc-1")
@@ -42,7 +50,7 @@ func TestReconcileTopicRejectsLiveMirror(t *testing.T) {
 			r := restmock.New("lkc-1")
 			r.AddMirror(kafkarest.Mirror{LinkName: "link-a", MirrorTopicName: "orders", SourceTopicName: "orders", Status: status})
 
-			st, err := ReconcileTopic(context.Background(), guardTopic("Enforce"), cluster(), k, nil, stubResolver{}, nil, nil, nil, r)
+			st, err := ReconcileTopic(context.Background(), guardTopic("Enforce"), cluster(), k, nil, stubResolver{}, nil, nil, nil, topicSnap(k, r, "orders"))
 			if err != nil {
 				t.Fatalf("Rejected is terminal, want nil error, got %v", err)
 			}
@@ -66,7 +74,7 @@ func TestReconcileTopicRESTDownBlocks(t *testing.T) {
 			r := restmock.New("lkc-1")
 			r.Fail("ListMirrors", errors.New("rest down"))
 
-			st, err := ReconcileTopic(context.Background(), guardTopic(mode), cluster(), k, nil, stubResolver{}, nil, nil, nil, r)
+			st, err := ReconcileTopic(context.Background(), guardTopic(mode), cluster(), k, nil, stubResolver{}, nil, nil, nil, topicSnap(k, r, "orders"))
 			if err == nil || !strings.Contains(err.Error(), "rest down") {
 				t.Fatalf("err = %v, want a non-nil error mentioning the REST failure", err)
 			}
@@ -86,7 +94,7 @@ func TestReconcileTopicRESTDownBlocks(t *testing.T) {
 func TestReconcileTopicClusterIDMismatchBlocks(t *testing.T) {
 	k := guardKafka(nil)
 	r := restmock.New("lkc-other")
-	_, err := ReconcileTopic(context.Background(), guardTopic("Enforce"), cluster(), k, nil, stubResolver{}, nil, nil, nil, r)
+	_, err := ReconcileTopic(context.Background(), guardTopic("Enforce"), cluster(), k, nil, stubResolver{}, nil, nil, nil, topicSnap(k, r, "orders"))
 	if err == nil {
 		t.Fatal("cluster identity mismatch must block with an error")
 	}
@@ -114,7 +122,7 @@ func TestReconcileTopicNoRESTUnchanged(t *testing.T) {
 	k2 := guardKafka(guardLiveTopic())
 	r := restmock.New("lkc-1")
 	r.AddMirror(kafkarest.Mirror{LinkName: "link-a", MirrorTopicName: "other", Status: "ACTIVE"})
-	if _, err := ReconcileTopic(context.Background(), guardTopic("Enforce"), cluster(), k2, nil, stubResolver{}, nil, nil, nil, r); err != nil {
+	if _, err := ReconcileTopic(context.Background(), guardTopic("Enforce"), cluster(), k2, nil, stubResolver{}, nil, nil, nil, topicSnap(k2, r, "orders")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := k2.Calls(); !reflect.DeepEqual(got, want) {
@@ -126,7 +134,7 @@ func TestReconcileTopicStoppedFormerMirrorManaged(t *testing.T) {
 	k := guardKafka(guardLiveTopic())
 	r := restmock.New("lkc-1")
 	r.AddMirror(kafkarest.Mirror{LinkName: "link-a", MirrorTopicName: "orders", Status: "STOPPED"})
-	if _, err := ReconcileTopic(context.Background(), guardTopic("Enforce"), cluster(), k, nil, stubResolver{}, nil, nil, nil, r); err != nil {
+	if _, err := ReconcileTopic(context.Background(), guardTopic("Enforce"), cluster(), k, nil, stubResolver{}, nil, nil, nil, topicSnap(k, r, "orders")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := k.Calls(); !reflect.DeepEqual(got, []string{"UpdateTopicConfig orders"}) {
@@ -145,7 +153,7 @@ func TestReconcileTopicLiveMirrorSkipsRoleBindings(t *testing.T) {
 	r.AddMirror(kafkarest.Mirror{LinkName: "link-a", MirrorTopicName: "orders", Status: "ACTIVE"})
 	m := mdsmock.New()
 
-	if _, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, m, rbViewFor(tp, cl.Spec.Authorization.MDS), r); err != nil {
+	if _, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, m, rbViewFor(tp, cl.Spec.Authorization.MDS), topicSnap(k, r, "orders")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for _, c := range m.Calls() {
@@ -163,7 +171,7 @@ func TestReconcileTopicLiveMirrorNoPrune(t *testing.T) {
 	r := restmock.New("lkc-1")
 	r.AddMirror(kafkarest.Mirror{LinkName: "link-a", MirrorTopicName: "payments.orders", Status: "ACTIVE"})
 
-	if _, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil, r); err != nil {
+	if _, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil, topicSnap(k, r, "payments.orders")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for _, c := range k.Calls() {
