@@ -278,3 +278,31 @@ func TestImportLinkConfigsUnreadableDropsACLs(t *testing.T) {
 	requireNoFallback(t, res)
 	require.True(t, res.Partial)
 }
+
+func TestImportStoppedMirrorWithoutTopicSkippedPartial(t *testing.T) {
+	k, r := mirrorFixture(t, "ACTIVE", nil, map[string]string{"acl.sync.enable": "false"}, nil)
+	r.AddMirror(kafkarest.Mirror{LinkName: "prod-to-dr", MirrorTopicName: "ghost",
+		SourceTopicName: "ghost", Status: "STOPPED", NumPartitions: 1})
+	res := importWithREST(t, k, r)
+
+	require.Len(t, res.Mirrors, 1)
+	require.Equal(t, "payments.orders", res.Mirrors[0].Spec.TopicName)
+	for _, tp := range res.Topics {
+		require.NotEqual(t, "ghost", tp.Spec.TopicName)
+	}
+	require.Contains(t, res.Warnings,
+		`MirrorStaleEntry: REST lists stopped mirror "ghost" but the topic does not exist; skipped`)
+	require.True(t, res.Partial)
+}
+
+func TestImportNonStoppedMirrorWithoutTopicStillFails(t *testing.T) {
+	for _, status := range []string{"PAUSED", "PENDING_STOPPED", "SOMETHING_NEW"} {
+		k, r := mirrorFixture(t, "ACTIVE", nil, nil, nil)
+		r.AddMirror(kafkarest.Mirror{LinkName: "prod-to-dr", MirrorTopicName: "ghost",
+			SourceTopicName: "ghost", Status: status, NumPartitions: 1})
+		_, err := ReadSnapshot(context.Background(), k, nil, nil, nil,
+			SnapshotOptions{SkipUsers: true, SkipQuotas: true, REST: r})
+		require.Error(t, err, status)
+		require.Contains(t, err.Error(), "Unknown", status)
+	}
+}

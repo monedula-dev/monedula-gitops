@@ -122,6 +122,9 @@ type Snapshot struct {
 	// DeferredMirrors lists mirror topics being promoted (PENDING_STOPPED):
 	// imported as neither kind until promotion finishes. Sorted.
 	DeferredMirrors []string
+	// StaleMirrors lists STOPPED mirror entries that REST still reports but
+	// whose topic does not exist in Kafka: skipped (neither kind). Sorted.
+	StaleMirrors []string
 }
 
 // SnapshotOptions carries flags that skip optional, potentially-expensive
@@ -287,6 +290,7 @@ func ReadSnapshot(ctx context.Context, kClient kafka.AdminClient, srClient schem
 	snap := Snapshot{Topics: out, ACLs: acls, Quotas: quotas, ScramCredentials: creds}
 	if opt.REST != nil {
 		snap.Mirrors, snap.MirrorLinks, snap.DeferredMirrors = ms.mirrors, ms.links, ms.deferred
+		snap.StaleMirrors = ms.stale
 	}
 
 	if mdsClient != nil {
@@ -329,13 +333,17 @@ type mirrorSplit struct {
 	mirrors  []MirrorSnapshot
 	links    map[string]MirrorLinkInfo
 	deferred []string
+	stale    []string
 }
 
 // classifyMirrors reads the mirror classification snapshot (Kafka Admin and
 // REST cluster IDs verified equal) and splits topics: Mirror -> mirrors,
 // StoppingMirror -> deferred, StoppedFormerMirror and Normal -> stay topics.
 // Any incomplete read or Unknown classification fails the import: guessing the
-// resource kind could import one physical topic as the wrong kind. Link
+// resource kind could import one physical topic as the wrong kind. The one
+// exception is a STOPPED REST entry whose topic does not exist (a stale entry
+// for a deleted former mirror): there is nothing to import, so it is recorded
+// in stale and skipped. Link
 // configs are read for every link that owns at least one mirror so ACL import
 // can tell whether acl.sync.enable is on.
 func classifyMirrors(ctx context.Context, k kafka.AdminClient, r kafkarest.Client, topics []TopicSnapshot, includeInternal bool) (mirrorSplit, error) {
@@ -364,17 +372,22 @@ func classifyMirrors(ctx context.Context, k kafka.AdminClient, r kafkarest.Clien
 		mirrorNames = append(mirrorNames, n)
 	}
 	sort.Strings(mirrorNames)
+	var stale []string
 	for _, n := range mirrorNames {
 		if !includeInternal && isInternalTopic(n) {
 			continue
 		}
 		if snap.Classify(n) == mirror.Unknown {
+			if _, hasTopic := snap.Topics[n]; !hasTopic && mirror.ClassifyStatus(snap.Mirrors[n].Status) == mirror.StatusStopped {
+				stale = append(stale, n)
+				continue
+			}
 			return mirrorSplit{}, fmt.Errorf("mirror topic %q: classification Unknown (status %q); refusing to guess its kind",
 				n, snap.Mirrors[n].Status)
 		}
 	}
 
-	out := mirrorSplit{links: map[string]MirrorLinkInfo{}}
+	out := mirrorSplit{links: map[string]MirrorLinkInfo{}, stale: stale}
 	for _, t := range topics {
 		switch c := snap.Classify(t.Name); c {
 		case mirror.Mirror:

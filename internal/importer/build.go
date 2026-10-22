@@ -60,6 +60,7 @@ const (
 	codeMirrorConfigNotImported          = "MirrorConfigNotImported"
 	codeMirrorUnhealthy                  = "MirrorUnhealthy"
 	codeMirrorImportDeferred             = "MirrorImportDeferred"
+	codeMirrorStaleEntry                 = "MirrorStaleEntry"
 	codeExternallyManagedOrAmbiguousACLs = "ExternallyManagedOrAmbiguousACLs"
 )
 
@@ -68,6 +69,7 @@ const (
 var partialWarningCodes = []string{
 	codeMirrorConfigNotImported,
 	codeMirrorImportDeferred,
+	codeMirrorStaleEntry,
 	codeExternallyManagedOrAmbiguousACLs,
 }
 
@@ -396,7 +398,7 @@ func filterMirrorACLs(snap Snapshot, warnings *[]string) []kafka.ACLState {
 // a mirror cannot be proven, so explicitly set configs are only reported.
 // Metadata names come from topicMetaName + disambiguateName with the topics'
 // owner map, so a mirror never shares a metadata.name with a topic. Deferred
-// (PENDING_STOPPED) mirrors are reported, not built.
+// (PENDING_STOPPED) mirrors and stale STOPPED entries are reported, not built.
 func buildMirrors(snap Snapshot, clusterName string, nameOwner map[string]bool, warnings *[]string) []*v1alpha1.KafkaMirrorTopic {
 	var out []*v1alpha1.KafkaMirrorTopic
 	for _, ms := range snap.Mirrors {
@@ -437,6 +439,11 @@ func buildMirrors(snap Snapshot, clusterName string, nameOwner map[string]bool, 
 		*warnings = append(*warnings, fmt.Sprintf(
 			"%s: mirror topic %q is being promoted (PENDING_STOPPED); re-run import after it finishes",
 			codeMirrorImportDeferred, name))
+	}
+	for _, name := range snap.StaleMirrors {
+		*warnings = append(*warnings, fmt.Sprintf(
+			"%s: REST lists stopped mirror %q but the topic does not exist; skipped",
+			codeMirrorStaleEntry, name))
 	}
 	return out
 }
