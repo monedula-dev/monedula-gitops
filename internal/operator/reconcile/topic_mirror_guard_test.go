@@ -14,8 +14,8 @@ import (
 	kafkamock "github.com/monedula-dev/monedula-gitops/internal/kafka/mock"
 	"github.com/monedula-dev/monedula-gitops/internal/kafkarest"
 	restmock "github.com/monedula-dev/monedula-gitops/internal/kafkarest/mock"
-	"github.com/monedula-dev/monedula-gitops/internal/mirror"
 	mdsmock "github.com/monedula-dev/monedula-gitops/internal/mds/mock"
+	"github.com/monedula-dev/monedula-gitops/internal/mirror"
 )
 
 // guardTopic is a KafkaTopic for "orders" whose desired config differs from
