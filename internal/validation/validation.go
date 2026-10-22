@@ -1044,7 +1044,10 @@ func ValidateClusterREST(c *v1alpha1.KafkaCluster) []error {
 	k := c.Name
 	if r.Endpoint == "" {
 		errs = append(errs, errf("KafkaCluster %s: rest.endpoint is required", k))
-	} else if u, err := url.Parse(r.Endpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+	} else if u, err := url.Parse(r.Endpoint); err == nil && u.User != nil {
+		// Never echo the endpoint here: it carries the credentials.
+		errs = append(errs, errf("KafkaCluster %s: rest.endpoint must not contain credentials; use rest.auth", k))
+	} else if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		errs = append(errs, errf("KafkaCluster %s: rest.endpoint %q must be an http or https URL", k, r.Endpoint))
 	} else if strings.HasSuffix(strings.TrimRight(u.Path, "/"), "/v3") {
 		errs = append(errs, errf("KafkaCluster %s: rest.endpoint must not include /v3 (the client appends it)", k))

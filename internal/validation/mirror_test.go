@@ -100,3 +100,13 @@ func TestValidateClusterRESTAuthShape(t *testing.T) {
 	c = mkRESTCluster("dr", &v1alpha1.KafkaRESTConfig{Endpoint: "https://h", Auth: &v1alpha1.MDSAuth{Type: "mtls"}})
 	require.NotEmpty(t, ValidateClusterREST(c))
 }
+
+func TestValidateClusterRESTRejectsUserinfo(t *testing.T) {
+	for _, ep := range []string{"https://alice:s3cret@h:8090/kafka", "https://alice@h:8090/kafka", "ftp://alice:s3cret@h"} {
+		c := mkRESTCluster("dr", &v1alpha1.KafkaRESTConfig{Endpoint: ep})
+		got := errsText(ValidateClusterREST(c))
+		require.Contains(t, got, "KafkaCluster dr: rest.endpoint must not contain credentials; use rest.auth", ep)
+		require.NotContains(t, got, "alice", ep)
+		require.NotContains(t, got, "s3cret", ep)
+	}
+}
