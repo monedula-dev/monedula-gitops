@@ -35,7 +35,7 @@ func TestCellsLoad(t *testing.T) {
 		}
 		for _, capability := range c.Capabilities {
 			assert.Contains(t,
-				[]string{CapTopics, CapACLs, CapQuotas, CapSCRAM, CapSchemaRegistry, CapMDS},
+				[]string{CapTopics, CapACLs, CapQuotas, CapSCRAM, CapSchemaRegistry, CapMDS, CapClusterLinking},
 				capability, "cell %q has unknown capability %q", c.ID, capability)
 		}
 		for _, overlay := range c.Overlays {
@@ -50,7 +50,7 @@ func TestCellsLoad(t *testing.T) {
 		// Profile != "auth-mds"). Any other value isn't a typo that fails loudly:
 		// every one of those tests would just skip, go test would exit 0, and the
 		// cell would report a green PASS while running zero of its scenarios.
-		assert.Contains(t, []string{"", "auth-mds"}, c.Profile,
+		assert.Contains(t, []string{"", "auth-mds", "cluster-link"}, c.Profile,
 			"cell %q has profile %q, which no e2e runner test recognises — it would silently skip every profile-gated scenario for this cell instead of failing", c.ID, c.Profile)
 	}
 }
@@ -145,4 +145,17 @@ func TestMDSProfileHasACell(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "no e2e cell provides the auth-mds profile")
+}
+
+// The cluster-link profile is reachable only through a cell that names it. If
+// no such cell exists in the e2e tier, the cluster-linking scenario silently
+// stops running.
+func TestClusterLinkProfileHasACell(t *testing.T) {
+	var found bool
+	for _, c := range ForTier(TierE2E) {
+		if c.Profile == "cluster-link" && c.Supports(CapClusterLinking) {
+			found = true
+		}
+	}
+	assert.True(t, found, "no e2e cell provides the cluster-link profile")
 }

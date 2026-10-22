@@ -38,6 +38,7 @@ func TestScenarioRequiresAreSatisfiable(t *testing.T) {
 		matrix.CapSCRAM,
 		matrix.CapSchemaRegistry,
 		matrix.CapMDS,
+		matrix.CapClusterLinking,
 	}
 
 	totalRequirements := 0

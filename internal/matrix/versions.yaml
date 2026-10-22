@@ -6,8 +6,10 @@
 #   - the e2e tier (test/e2e/cli)
 #
 # Cell-to-profile rule: a cell WITHOUT `profile` runs every compose profile
-# EXCEPT auth-mds. The auth-mds profile runs ONLY under a cell that names it.
-# This keeps MDS on its pinned cp-server line without dropping it from the suite.
+# EXCEPT the profile-pinned ones (auth-mds, cluster-link). A profile-pinned cell
+# runs ONLY its own profile's scenarios, and those profiles run only under a
+# cell that names them. This keeps MDS on its pinned cp-server line, and cluster
+# linking on a Confluent Server image, without dropping them from the suite.
 #
 # Version rationale: cover the breaks that change behaviour, not every minor.
 # Apache 3.9 -> 4.0 is the KRaft-only / ZooKeeper-removal boundary. CP 7.x -> 8.x
@@ -84,3 +86,12 @@ cells:
     profile: auth-mds
     tiers: [e2e]
     capabilities: [topics, acls, quotas, scram, mds]
+
+  # cp-server carries cluster linking and the embedded Kafka REST v3 API that
+  # mirror topics are managed through. Two linked single-node clusters.
+  - id: cp-8.3-link
+    family: confluent
+    image: confluentinc/cp-server:8.3.1
+    profile: cluster-link
+    tiers: [e2e]
+    capabilities: [topics, acls, cluster-linking]
