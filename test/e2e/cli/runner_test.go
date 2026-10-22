@@ -9,7 +9,7 @@
 // The suite FAILS when Docker is absent (TestMain exits non-zero), so an
 // explicit `-tags e2e` run can't silently do nothing and still report `ok`;
 // set MONEDULA_E2E_SKIP_WITHOUT_DOCKER=1 to skip cleanly instead.
-// The five top-level tests run sequentially, gated on the matrix cell — the
+// The six top-level tests run sequentially, gated on the matrix cell — the
 // profiles they exercise bind fixed host ports (:9092 among them) so the
 // tests must not overlap.
 package clie2e
@@ -380,6 +380,60 @@ func composeUpMDS(t *testing.T, profileDir, project string) {
 	}
 }
 
+// composeLogs returns the compose logs of a stack (all services, or only the
+// named ones), for failure diagnostics.
+func composeLogs(stack composeStack, services ...string) string {
+	args := append([]string{"compose"}, composeFiles(stack.profileDir)...)
+	args = append(args, "-p", stack.project, "logs", "--no-color")
+	args = append(args, services...)
+	cmd := exec.Command("docker", args...)
+	cmd.Env = composeEnv()
+	out, _ := cmd.CombinedOutput()
+	return string(out)
+}
+
+// composeUpLink starts the cluster-link stack (two cp-server clusters and the
+// one-shot link-setup service). Like composeUpMDS it does not use `up --wait`,
+// which treats the one-shot's exit as a failure; instead `up -d` starts the
+// stack (compose itself holds link-setup back until both brokers are healthy)
+// and the runner then blocks until the one-shot has created the topics and the
+// src-to-dest link, failing with the logs on a non-zero exit.
+func composeUpLink(t *testing.T, stack composeStack) {
+	t.Helper()
+	// Teardown registered before start — see composeUp for why.
+	t.Cleanup(func() {
+		dumpComposeLogsOnFailure(t, stack.profileDir, stack.project)
+		composeDown(stack.profileDir, stack.project)
+	})
+
+	upArgs := append([]string{"compose"}, composeFiles(stack.profileDir)...)
+	upArgs = append(upArgs, "-p", stack.project, "up", "-d")
+	upCmd := exec.Command("docker", upArgs...)
+	upCmd.Env = composeEnv()
+	if out, err := upCmd.CombinedOutput(); err != nil {
+		t.Logf("compose up output:\n%s", out)
+		t.Logf("compose logs:\n%s", composeLogs(stack))
+		t.Fatalf("docker compose up (cluster-link) failed: %v", err)
+	}
+
+	// Not `compose wait link-setup`: it only sees containers that still exist
+	// as running, so when the one-shot has already exited 0 by the time it is
+	// called it fails with "no containers for project" (exit 1). waitForInit
+	// polls `ps -a`, which also reports exited containers, and fatals with the
+	// service's logs on a non-zero exit or after its deadline.
+	waitForInit(t, stack.profileDir, stack.project, "link-setup")
+	t.Logf("compose stack %q is up; link-setup output:\n%s", stack.project, composeLogs(stack, "link-setup"))
+}
+
+// composeStack identifies the running compose stack a scenario executes
+// against: the profile directory (whose compose files composeFiles resolves
+// for the active cell) and the compose project name. exec steps need both to
+// address a service of that stack.
+type composeStack struct {
+	profileDir string
+	project    string
+}
+
 // runCLIBinary executes binPath with the given args, injecting the cred env
 // (plus the current os.Environ) into the subprocess. Returns combined output
 // and the exit code.
@@ -472,8 +526,9 @@ func scenarioManifestsDir(scenarioDir, mode string) string {
 // runCLIScenario loads a scenario's metadata and expect contract, runs the
 // appropriate CLI command against the real broker, asserts the exit code and
 // output, optionally checks live state, and defers cleanup.sh.
-func runCLIScenario(t *testing.T, scenarioDir, profileDir string) {
+func runCLIScenario(t *testing.T, scenarioDir string, stack composeStack) {
 	t.Helper()
+	profileDir := stack.profileDir
 
 	// Load scenario metadata.
 	sc, err := e2e.LoadScenario(scenarioDir)
@@ -511,7 +566,7 @@ func runCLIScenario(t *testing.T, scenarioDir, profileDir string) {
 				t.Logf("cleanup.sh warning: %v\n%s", err, out)
 			}
 		})
-		runSteps(t, scenarioDir, clusterConfigFile, exp.Steps)
+		runSteps(t, scenarioDir, clusterConfigFile, stack, exp.Steps)
 		checkLiveState(t, scenarioDir, clusterConfigFile, exp)
 		return
 	}
@@ -594,8 +649,33 @@ func checkLiveState(t *testing.T, scenarioDir, clusterConfigFile string, exp *e2
 	}
 }
 
+// composeExec runs command inside service of the compose stack
+// (`docker compose -p <project> -f ... exec -T <service> <command...>`) and
+// returns its combined output and exit code. Like runCLIBinary, a command
+// that could not be started at all reports exit 127. It is never retried:
+// an exec step may change broker state.
+func composeExec(stack composeStack, service string, command []string) (string, int) {
+	args := []string{"compose", "-p", stack.project}
+	args = append(args, composeFiles(stack.profileDir)...)
+	args = append(args, "exec", "-T", service)
+	args = append(args, command...)
+	cmd := exec.Command("docker", args...)
+	cmd.Env = composeEnv()
+	out, err := cmd.CombinedOutput()
+	code := 0
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			code = ee.ExitCode()
+		} else {
+			code = 127
+		}
+	}
+	return string(out), code
+}
+
 // runSteps executes a scenario's ordered steps against the (already-up) cluster.
-func runSteps(t *testing.T, scenarioDir, clusterConfigFile string, steps []e2e.Step) {
+// stack is the compose stack that cluster runs in; exec steps run inside it.
+func runSteps(t *testing.T, scenarioDir, clusterConfigFile string, stack composeStack, steps []e2e.Step) {
 	t.Helper()
 	var importedDir string // set by an "import" step; referenced via the "@imported" sentinel
 	for i, st := range steps {
@@ -681,6 +761,25 @@ func runSteps(t *testing.T, scenarioDir, clusterConfigFile string, steps []e2e.S
 			} else if code != 0 {
 				t.Fatalf("step %d: doctor failed (exit %d):\n%s", i, code, out)
 			}
+		case "exec":
+			// LoadExpect already rejects an exec step without a service or
+			// command; this guards hand-built steps.
+			if st.Exec == nil || st.Exec.Service == "" || len(st.Exec.Command) == 0 {
+				t.Fatalf("step %d: exec step needs exec.service and exec.command", i)
+			}
+			out, code := composeExec(stack, st.Exec.Service, st.Exec.Command)
+			t.Logf("=== step %d: exec %s: %s (exit %d) ===\n%s", i, st.Exec.Service,
+				strings.Join(st.Exec.Command, " "), code, out)
+			if st.Expect != nil {
+				if r := e2e.CheckExitCode(code, st.Expect.ExitCode); !r.Pass {
+					t.Errorf("step %d exit: %s\n%s", i, r.Name, r.Detail)
+				}
+				if r := e2e.CheckOutput(out, st.Expect.OutputContains, st.Expect.OutputMatches); !r.Pass {
+					t.Errorf("step %d output: %s\n%s", i, r.Name, r.Detail)
+				}
+			} else if code != 0 {
+				t.Fatalf("step %d: exec failed (exit %d):\n%s", i, code, out)
+			}
 		default:
 			t.Fatalf("step %d: unknown run %q", i, st.Run)
 		}
@@ -722,7 +821,7 @@ func TestSharedSASLScenarios(t *testing.T) {
 		sd := sd // capture
 		name := filepath.Base(sd)
 		t.Run(name, func(t *testing.T) {
-			runCLIScenario(t, sd, profileDir)
+			runCLIScenario(t, sd, composeStack{profileDir: profileDir, project: project})
 		})
 	}
 }
@@ -745,7 +844,7 @@ func TestAuthSASLSSLScenarios(t *testing.T) {
 		sd := sd // capture
 		name := filepath.Base(sd)
 		t.Run(name, func(t *testing.T) {
-			runCLIScenario(t, sd, profileDir)
+			runCLIScenario(t, sd, composeStack{profileDir: profileDir, project: project})
 		})
 	}
 }
@@ -768,7 +867,7 @@ func TestAuthMTLSScenarios(t *testing.T) {
 		sd := sd
 		name := filepath.Base(sd)
 		t.Run(name, func(t *testing.T) {
-			runCLIScenario(t, sd, profileDir)
+			runCLIScenario(t, sd, composeStack{profileDir: profileDir, project: project})
 		})
 	}
 }
@@ -794,7 +893,7 @@ func TestAuthOAuthScenarios(t *testing.T) {
 		sd := sd
 		name := filepath.Base(sd)
 		t.Run(name, func(t *testing.T) {
-			runCLIScenario(t, sd, profileDir)
+			runCLIScenario(t, sd, composeStack{profileDir: profileDir, project: project})
 		})
 	}
 }
@@ -833,7 +932,34 @@ func TestAuthMDSScenarios(t *testing.T) {
 		sd := sd
 		name := filepath.Base(sd)
 		t.Run(name, func(t *testing.T) {
-			runCLIScenario(t, sd, profileDir)
+			runCLIScenario(t, sd, composeStack{profileDir: profileDir, project: project})
+		})
+	}
+}
+
+// TestClusterLinkScenarios brings up the cluster-link compose stack (a source
+// and a destination cp-server cluster joined by the src-to-dest cluster link)
+// and runs the mirror-topic scenario against the destination cluster. Like
+// auth-mds it runs only under the cell that pins its profile.
+func TestClusterLinkScenarios(t *testing.T) {
+	if cell.Profile != "cluster-link" {
+		t.Skipf("cluster-link runs only under a cell that pins it; active cell is %s", cell.ID)
+	}
+	stack := composeStack{
+		profileDir: filepath.Join(repoRoot, "scenarios", "clusters", "cluster-link"),
+		project:    "mon-e2e-link",
+	}
+
+	composeUpLink(t, stack)
+
+	scenarios := []string{
+		filepath.Join(repoRoot, "scenarios", "26-mirror-topic"),
+	}
+	for _, sd := range scenarios {
+		sd := sd
+		name := filepath.Base(sd)
+		t.Run(name, func(t *testing.T) {
+			runCLIScenario(t, sd, stack)
 		})
 	}
 }

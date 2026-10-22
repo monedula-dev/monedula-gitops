@@ -45,9 +45,10 @@ func TestCellsLoad(t *testing.T) {
 				c.ID, overlay)
 		}
 
-		// The e2e runner's profile-gated scenario tests only know about "" and
-		// "auth-mds" (test/e2e/cli/runner_test.go skips on Profile != "" or
-		// Profile != "auth-mds"). Any other value isn't a typo that fails loudly:
+		// The e2e runner's profile-gated scenario tests only know about "",
+		// "auth-mds" and "cluster-link" (test/e2e/cli/runner_test.go skips on
+		// Profile != "", Profile != "auth-mds" or Profile != "cluster-link").
+		// Any other value isn't a typo that fails loudly:
 		// every one of those tests would just skip, go test would exit 0, and the
 		// cell would report a green PASS while running zero of its scenarios.
 		assert.Contains(t, []string{"", "auth-mds", "cluster-link"}, c.Profile,

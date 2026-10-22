@@ -152,14 +152,24 @@ type SubjectExpect struct {
 
 // Step is one action in a scenario's ordered steps sequence (expect.yaml
 // `steps:`). When a scenario declares steps, the CLI runner executes them in
-// order instead of the single-command flow. Run is apply|verify|diff|mutate|import|doctor
-// (import + the "@imported" manifests sentinel, and doctor, are CLI-runner-only conventions).
+// order instead of the single-command flow. Run is apply|verify|diff|mutate|import|doctor|exec
+// (import + the "@imported" manifests sentinel, doctor, and exec are CLI-runner-only conventions).
 type Step struct {
 	Run       string         `json:"run"`
 	Manifests string         `json:"manifests,omitempty"` // subdir override (default the scenario's manifests/)
 	Flags     []string       `json:"flags,omitempty"`     // extra CLI flags, e.g. ["--prune"]
 	Expect    *CommandExpect `json:"expect,omitempty"`    // exit/output assertion for apply|verify|diff|import|doctor
 	Mutate    *MutateSpec    `json:"mutate,omitempty"`    // out-of-band change when Run == "mutate"
+	Exec      *ExecSpec      `json:"exec,omitempty"`      // command to run in a compose service when Run == "exec"
+}
+
+// ExecSpec is the command an exec step runs inside one of the cluster
+// profile's compose services (`docker compose exec -T <service> <command...>`).
+// It drives out-of-band broker-side actions that have no CLI counterpart, such
+// as producing records or pausing a mirror topic with the Kafka tools.
+type ExecSpec struct {
+	Service string   `json:"service"`
+	Command []string `json:"command"`
 }
 
 // MutateSpec is the out-of-band broker change a mutate step applies. v1 supports
@@ -184,6 +194,14 @@ func LoadExpect(path string) (*Expect, error) {
 	var e Expect
 	if err := yaml.Unmarshal(b, &e); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	for i, st := range e.Steps {
+		if st.Run != "exec" {
+			continue
+		}
+		if st.Exec == nil || st.Exec.Service == "" || len(st.Exec.Command) == 0 {
+			return nil, fmt.Errorf("%s: step %d: exec step needs exec.service and a non-empty exec.command", path, i)
+		}
 	}
 	return &e, nil
 }

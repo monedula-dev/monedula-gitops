@@ -97,8 +97,10 @@ Cluster profiles live in `scenarios/clusters/`. Each profile directory contains 
 `cluster.yaml` with broker address, protocol, and credentials for a specific test
 cluster: `shared-sasl` (SASL_PLAINTEXT/SCRAM, the default), `auth-sasl-ssl`
 (SCRAM-over-TLS, with dev certs), `auth-mtls` (mutual-TLS client-cert auth), and
-`auth-oauth` (SASL_PLAINTEXT/OAUTHBEARER validated against a mock OIDC server), and
-`auth-mds` (cp-server + LDAP + the Metadata Service for RBAC role bindings).
+`auth-oauth` (SASL_PLAINTEXT/OAUTHBEARER validated against a mock OIDC server),
+`auth-mds` (cp-server + LDAP + the Metadata Service for RBAC role bindings), and
+`cluster-link` (two cp-server clusters joined by a cluster link, managed through the
+destination's embedded Kafka REST API, for mirror topics).
 
 ## Catalog growth
 
