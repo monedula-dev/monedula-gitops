@@ -169,7 +169,7 @@ func (r *KafkaTopicReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// serialized by the ACL substrate lock in deleteTopicState.
 	unlockIdentity := func() {}
 	if topic.DeletionTimestamp.IsZero() {
-		unlockIdentity = lockIdentity(r.Locks, &cluster, "KafkaTopic", operatorwebhook.ResolvedTopicName(&topic))
+		unlockIdentity = lockIdentity(r.Locks, &cluster, topicIdentityKind, operatorwebhook.ResolvedTopicName(&topic))
 		defer unlockIdentity()
 		if res, done, err := r.duplicateIdentityGate(ctx, &topic); done {
 			return res, err

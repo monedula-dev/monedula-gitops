@@ -84,8 +84,9 @@ func lockTopicSubstrates(reg *locking.Registry, cluster *v1alpha1.KafkaCluster) 
 
 // lockIdentity acquires the per-broker-identity mutex for (cluster, kind,
 // identity) and returns its idempotent release func; nil reg returns a no-op
-// (see the file comment). kind is the CR kind string ("KafkaTopic",
-// "KafkaQuota", "KafkaUser", "KafkaRoleBinding"); identity is the resolved
+// (see the file comment). kind is the CR kind string ("KafkaQuota",
+// "KafkaUser", "KafkaRoleBinding"), or topicIdentityKind for the topic
+// identity KafkaTopic and KafkaMirrorTopic share; identity is the resolved
 // broker identity the duplicate-identity gate compares (duplicate.go) —
 // derivable from the spec alone, so the lock can be taken right after cluster
 // resolution, BEFORE the gate's scan and before any substrate lock (the
