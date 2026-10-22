@@ -72,7 +72,42 @@ const (
 	// reporting but never executed; absent from the taxonomy by design (no
 	// risk, no gate). The executor records it as the terminal Unsupported.
 	SchemaSuperseded Action = "SchemaSuperseded"
+
+	// Cluster-link mirror topic ops. CreateMirrorTopic creates a mirror of
+	// MirrorSource on MirrorLink; UpdateMirrorTopicConfig alters one declared,
+	// non-link-managed config key (Field/From/To) through REST configs:alter.
+	CreateMirrorTopic       Action = "CreateMirrorTopic"
+	UpdateMirrorTopicConfig Action = "UpdateMirrorTopicConfig"
+
+	// Mirror findings. Like Rejected and SchemaSuperseded they are carried for
+	// reporting but never executed, and are absent from the taxonomy by design
+	// (no risk, no gate).
+	//
+	// MirrorTopicUnhealthy: the mirror reports a paused/failed status.
+	// MirrorTopicStopping: the mirror is being stopped (PENDING_STOPPED).
+	// MirrorTopicPromoted: the topic was a mirror and has been stopped
+	// (promoted/failed over); it is now a normal topic.
+	// MirrorTopicProgressing: the mirror is still being set up or restored
+	// (informational, see Informational).
+	// UnsupportedReplicationFactorChange: the declared replicationFactor
+	// differs from the live mirror's (create-time only).
+	// StateReadError: live mirror state could not be read or classified
+	// (operational error, see OperationalError).
+	MirrorTopicUnhealthy               Action = "MirrorTopicUnhealthy"
+	MirrorTopicStopping                Action = "MirrorTopicStopping"
+	MirrorTopicPromoted                Action = "MirrorTopicPromoted"
+	MirrorTopicProgressing             Action = "MirrorTopicProgressing"
+	UnsupportedReplicationFactorChange Action = "UnsupportedReplicationFactorChange"
+	StateReadError                     Action = "StateReadError"
 )
+
+// Informational reports whether a finding is purely informational (expected
+// transient state, not drift that needs attention).
+func Informational(a Action) bool { return a == MirrorTopicProgressing }
+
+// OperationalError reports whether an op records a failure to observe live
+// state rather than a difference between desired and live state.
+func OperationalError(a Action) bool { return a == StateReadError }
 
 type Risk string
 
@@ -141,6 +176,9 @@ var taxonomy = map[Action]struct {
 	UpdateScramCredential: {RiskMedium, GateNone},
 	RotateScramCredential: {RiskLow, GateNone},
 	DeleteScramCredential: {RiskMedium, GateDestructive},
+
+	CreateMirrorTopic:       {RiskLow, GateNone},
+	UpdateMirrorTopicConfig: {RiskLow, GateNone},
 }
 
 // RiskOf and GateOf return the risk/gate for an Action. An Action not present
@@ -214,6 +252,15 @@ type Operation struct {
 	// any rendered output, and resolver errors identify the source (env var
 	// name / file path) only, never a value.
 	PasswordRef *v1alpha1.ValueFrom `json:"-"`
+
+	// Mirror-topic op payload (internal; never rendered — json:"-").
+	// CreateMirrorTopic also uses ReplicationFactor (0 = not declared) and
+	// Config (declared configs); UpdateMirrorTopicConfig uses Field/From/To.
+	MirrorLink   string `json:"-"` // cluster link name
+	MirrorSource string `json:"-"` // source topic name
+	// MirrorNameExplicit is DesiredMirror.TopicNameExplicit, so the writer can
+	// re-run mirror.CheckPrefix against freshly read link configs.
+	MirrorNameExplicit bool `json:"-"`
 }
 
 // New builds an Operation with risk/approval filled from the taxonomy.

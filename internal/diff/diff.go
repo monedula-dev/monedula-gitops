@@ -17,6 +17,7 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/access"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
 	"github.com/monedula-dev/monedula-gitops/internal/managedset"
+	"github.com/monedula-dev/monedula-gitops/internal/mirror"
 	"github.com/monedula-dev/monedula-gitops/internal/operations"
 	"github.com/monedula-dev/monedula-gitops/internal/quota"
 	"github.com/monedula-dev/monedula-gitops/internal/rbac"
@@ -232,6 +233,13 @@ type Live struct {
 	// condition (spec §17.1); the CLI logs it as a warning. Empty when the
 	// fetch was skipped (no subjects managed) or it succeeded.
 	GlobalCompatibilityErr string
+
+	// Mirrors is the live destination mirror snapshot (topics, mirrors and
+	// cluster links read through Kafka Admin and Kafka REST). nil means mirror
+	// state was not read (no REST configured); computeMirrorOps then reports a
+	// StateReadError for every declared mirror. Ignored when no mirrors are
+	// declared.
+	Mirrors *mirror.Snapshot
 }
 
 // aclTarget is a human-readable identifier for an ACL operation.
@@ -258,6 +266,7 @@ func Compute(desired Desired, live Live) []operations.Operation {
 	ops = append(ops, computeQuotaOps(desired, live)...)
 	ops = append(ops, computeRoleBindingOps(desired, live)...)
 	ops = append(ops, computeUserOps(desired, live)...)
+	ops = append(ops, computeMirrorOps(desired, live)...)
 
 	// Deterministic final ordering: by Action, then Target, then Field, then Subject.
 	// This is a STABLE refinement of already-sorted inputs (topic ops are emitted
