@@ -1,0 +1,12 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaMirrorTopic
+metadata:
+  name: ledger-mirror
+spec:
+  clusterRef:
+    name: dest
+  linkName: src-to-dest
+  # The destination name is ledger, which is already a normal topic on the
+  # destination cluster (created by link-setup). The plan rejects the mirror
+  # before any write, so the missing source topic never matters.
+  sourceTopicName: ledger
