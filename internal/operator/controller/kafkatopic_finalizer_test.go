@@ -315,19 +315,59 @@ func TestFinalizerNoApprovalSkipsClients(t *testing.T) {
 }
 
 // TestFinalizerRESTBuildFailureBlocks: with approval and no claimant, a REST
-// client build failure takes the unreachable-deletion path (finalizer kept,
-// nothing deleted).
+// client build failure keeps the finalizer, deletes nothing and is reported
+// accurately as DeleteBlocked (not as an unreachable cluster).
 func TestFinalizerRESTBuildFailureBlocks(t *testing.T) {
 	cl := deletingDeleteTopic(t, allowDelete())
 	k := kafkamock.New(seededTopics("payments.orders"), coOwnedLiveACLs())
-	r := &KafkaTopicReconciler{Client: cl, Scheme: topicScheme(t),
+	rec := events.NewFakeRecorder(8)
+	r := &KafkaTopicReconciler{Client: cl, Scheme: topicScheme(t), Recorder: rec,
 		Clients: stubFactory{k: k, restErr: errors.New("rest down")}}
 
-	if _, err := r.Reconcile(context.Background(), topicReq()); err == nil {
-		t.Fatal("REST build failure on the cleanup path must return an error")
+	_, err := r.Reconcile(context.Background(), topicReq())
+	if err == nil || !strings.Contains(err.Error(), "rest down") {
+		t.Fatalf("REST build failure on the cleanup path must return its error, got %v", err)
 	}
 	assertFinalizerKept(t, cl)
 	if callsContain(k.Calls(), "DeleteTopic") || callsContain(k.Calls(), "DeleteACLs") {
 		t.Fatalf("REST build failure must not delete anything, calls %v", k.Calls())
+	}
+	evs := drainEvents(rec)
+	if !findEvent(evs, "Warning", reasonDeleteBlocked, "Kafka REST client build failed: rest down") {
+		t.Fatalf("expected a DeleteBlocked warning naming the REST build failure, got %v", evs)
+	}
+	if findEvent(evs, "DeletionBlocked") || findEvent(evs, "cluster unreachable") {
+		t.Fatalf("a REST build failure is not an unreachable cluster, got %v", evs)
+	}
+}
+
+func isTopicList(l client.ObjectList) bool {
+	_, ok := l.(*v1alpha1.KafkaTopicList)
+	return ok
+}
+
+// TestFinalizerClaimScanTopicListErrorBlocks: the KafkaTopicList half of the
+// co-claimant scan failing is never a negative result.
+func TestFinalizerClaimScanTopicListErrorBlocks(t *testing.T) {
+	base := deletingDeleteTopic(t, allowDelete())
+	cl := listErrClient(base, isTopicList)
+	k := kafkamock.New(seededTopics("payments.orders"), coOwnedLiveACLs())
+	f := &countingFactory{stubFactory: stubFactory{k: k}}
+	rec := events.NewFakeRecorder(8)
+	r := &KafkaTopicReconciler{Client: cl, Scheme: topicScheme(t), Recorder: rec, Clients: f}
+
+	_, err := r.Reconcile(context.Background(), topicReq())
+	if err == nil || !strings.Contains(err.Error(), "injected: apiserver unavailable") {
+		t.Fatalf("claim-scan failure must return the scan error, got %v", err)
+	}
+	assertFinalizerKept(t, base)
+	if calls := k.Calls(); len(calls) != 0 {
+		t.Fatalf("claim-scan failure must not touch the broker, kafka calls = %v", calls)
+	}
+	if n := f.calls.Load(); n != 0 {
+		t.Fatalf("claim-scan failure must not build any client, factory calls = %d", n)
+	}
+	if evs := drainEvents(rec); !findEvent(evs, "Warning", "DeleteBlocked", "ClaimCheckFailed", "injected: apiserver unavailable") {
+		t.Fatalf("expected a DeleteBlocked/ClaimCheckFailed warning, got %v", evs)
 	}
 }

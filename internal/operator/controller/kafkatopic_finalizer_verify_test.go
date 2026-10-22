@@ -339,7 +339,7 @@ func TestFinalizerFinalVerifyTimeout(t *testing.T) {
 	}
 
 	start := time.Now()
-	err := r.deleteTopicState(context.Background(), tp, k, sr, nil, cluster, "ns1", verify, mirror.Normal)
+	_, err := r.deleteTopicState(context.Background(), tp, k, sr, nil, cluster, "ns1", verify, mirror.Normal)
 	elapsed := time.Since(start)
 	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("timeout must block with the deadline error, got %v", err)
@@ -381,7 +381,7 @@ func TestFinalizerFinalVerifyLateResultRejected(t *testing.T) {
 		return mirror.Normal, nil
 	}
 
-	if err := r.deleteTopicState(context.Background(), tp, k, nil, nil, cluster, "ns1", verify, mirror.Normal); err == nil {
+	if _, err := r.deleteTopicState(context.Background(), tp, k, nil, nil, cluster, "ns1", verify, mirror.Normal); err == nil {
 		t.Fatal("a result completed after the deadline must not authorize DeleteTopic")
 	}
 	if callsContain(k.Calls(), "DeleteTopic") {
@@ -416,7 +416,7 @@ func TestFinalizerFinalVerifyUnderACLLock(t *testing.T) {
 		return mirror.Normal, nil
 	}
 
-	if err := r.deleteTopicState(context.Background(), tp, k, nil, nil, cluster, "ns1", verify, mirror.Normal); err != nil {
+	if _, err := r.deleteTopicState(context.Background(), tp, k, nil, nil, cluster, "ns1", verify, mirror.Normal); err != nil {
 		t.Fatalf("deleteTopicState: %v", err)
 	}
 	if !heldDuringVerify {
@@ -448,7 +448,7 @@ func TestFinalizerFinalVerifyDefaultBudget(t *testing.T) {
 		remaining = time.Until(dl)
 		return mirror.Normal, nil
 	}
-	if err := r.deleteTopicState(context.Background(), tp, k, nil, nil, topicCluster(), "ns1", verify, mirror.Normal); err != nil {
+	if _, err := r.deleteTopicState(context.Background(), tp, k, nil, nil, topicCluster(), "ns1", verify, mirror.Normal); err != nil {
 		t.Fatalf("deleteTopicState: %v", err)
 	}
 	if remaining <= DefaultFinalizerVerificationTimeout-time.Second || remaining > DefaultFinalizerVerificationTimeout {
@@ -483,7 +483,7 @@ func TestFinalizerFinalVerifySingleAttempt(t *testing.T) {
 	}
 
 	start := time.Now()
-	err = r.deleteTopicState(context.Background(), tp, k, nil, nil, cluster, "ns1", verify, mirror.Normal)
+	_, err = r.deleteTopicState(context.Background(), tp, k, nil, nil, cluster, "ns1", verify, mirror.Normal)
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("a 503 during final verification must block")
@@ -508,12 +508,17 @@ func TestFinalizerAbsentRecoveryAfterRestart(t *testing.T) {
 	cl := fvDeletingTopic(t, false)
 	k := fvKafka(false)
 	rest := &hookREST{Client: fvREST(""), k: k}
-	r := &KafkaTopicReconciler{Client: cl, Scheme: topicScheme(t), Clients: stubFactory{k: k, rest: rest}}
+	rec := events.NewFakeRecorder(16)
+	r := &KafkaTopicReconciler{Client: cl, Scheme: topicScheme(t), Recorder: rec,
+		Clients: stubFactory{k: k, rest: rest}}
 
 	if _, err := r.Reconcile(context.Background(), topicReq()); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 	assertTopicGone(t, cl)
+	if evs := drainEvents(rec); !findEvent(evs, "Normal", "Deleted", "topic already absent; managed ACLs and schema subjects deleted") {
+		t.Fatalf("the success event must say the topic was already absent, got %v", evs)
+	}
 	if want := []string{"DeleteACLs 3"}; !reflect.DeepEqual(k.Calls(), want) {
 		t.Fatalf("kafka calls = %v, want %v (ACL cleanup, no DeleteTopic)", k.Calls(), want)
 	}
@@ -585,5 +590,120 @@ func TestFinalizerNoRESTLegacyAbsent(t *testing.T) {
 	assertTopicGone(t, cl)
 	if want := []string{"DeleteACLs 3", "DeleteTopic payments.orders"}; !reflect.DeepEqual(k.Calls(), want) {
 		t.Fatalf("kafka calls = %v, want %v", k.Calls(), want)
+	}
+}
+
+// TestFinalizerAbsentPreflightFinalVerifyBlocks: with an Absent preflight the
+// final verification runs before the first ACL deletion, so any result other
+// than Absent (or Normal/StoppedFormerMirror, which abort as "appeared") must
+// block before ANY cleanup: no ACL, topic or subject deletion, no
+// PartialCleanup event, the ACL lock released, and an error returned.
+func TestFinalizerAbsentPreflightFinalVerifyBlocks(t *testing.T) {
+	cases := []struct {
+		name   string
+		verify topicVerifier
+	}{
+		{"unknown nil error", func(context.Context) (mirror.Classification, error) { return mirror.Unknown, nil }},
+		{"mirror", func(context.Context) (mirror.Classification, error) { return mirror.Mirror, nil }},
+		{"stopping mirror", func(context.Context) (mirror.Classification, error) { return mirror.StoppingMirror, nil }},
+		{"error with a deletable class", func(context.Context) (mirror.Classification, error) {
+			return mirror.Absent, errors.New("injected: verification read failed")
+		}},
+		{"timeout", func(ctx context.Context) (mirror.Classification, error) {
+			<-ctx.Done()
+			return mirror.Unknown, ctx.Err()
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cl := fvDeletingTopic(t, true)
+			tp := fvGetTopic(t, cl)
+			k := fvKafka(false)
+			sr := srmock.New()
+			sr.Seed("payments.orders-value", "AVRO", "", avroBody)
+			reg := &locking.Registry{}
+			cluster := topicCluster()
+			rec := events.NewFakeRecorder(16)
+			r := &KafkaTopicReconciler{Client: cl, Scheme: topicScheme(t), Recorder: rec, Locks: reg,
+				FinalizerVerificationTimeout: 50 * time.Millisecond}
+
+			_, err := r.deleteTopicState(context.Background(), tp, k, sr, nil, cluster, "ns1", tc.verify, mirror.Absent)
+			if err == nil || !errors.Is(err, errDeletionBlocked) {
+				t.Errorf("want an errDeletionBlocked error, got %v", err)
+			}
+			if callsContain(k.Calls(), "DeleteACLs") || callsContain(k.Calls(), "DeleteTopic") {
+				t.Errorf("no ACL or topic deletion may run, kafka calls %v", k.Calls())
+			}
+			if callsContain(sr.Calls(), "DeleteSubject") {
+				t.Errorf("no subject deletion may run, sr calls %v", sr.Calls())
+			}
+			if evs := drainEvents(rec); findEvent(evs, "PartialCleanup") {
+				t.Errorf("nothing was deleted, so no PartialCleanup event, got %v", evs)
+			}
+			assertACLLockFree(t, reg, cluster)
+		})
+	}
+}
+
+// TestFinalizerPartialCleanupMessage: the PartialCleanup warning names the
+// blocked stage exactly once and lists schema subject deletion as not run only
+// when it would have run (a Schema Registry client and a schema block).
+func TestFinalizerPartialCleanupMessage(t *testing.T) {
+	const stage = "final verification before DeleteTopic"
+	cases := []struct {
+		name        string
+		withSchema  bool
+		withSR      bool
+		wantSubject bool
+	}{
+		{"schema and registry", true, true, true},
+		{"no schema block", false, true, false},
+		{"no registry", true, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cl := fvDeletingTopic(t, tc.withSchema)
+			tp := fvGetTopic(t, cl)
+			k := fvKafka(true)
+			var sr *srmock.Client
+			if tc.withSR {
+				sr = srmock.New()
+				sr.Seed("payments.orders-value", "AVRO", "", avroBody)
+			}
+			rec := events.NewFakeRecorder(16)
+			r := &KafkaTopicReconciler{Client: cl, Scheme: topicScheme(t), Recorder: rec, Locks: &locking.Registry{}}
+			verify := func(context.Context) (mirror.Classification, error) { return mirror.Mirror, nil }
+
+			var err error
+			if sr != nil {
+				_, err = r.deleteTopicState(context.Background(), tp, k, sr, nil, topicCluster(), "ns1", verify, mirror.Normal)
+			} else {
+				_, err = r.deleteTopicState(context.Background(), tp, k, nil, nil, topicCluster(), "ns1", verify, mirror.Normal)
+			}
+			if err == nil {
+				t.Fatal("a Mirror final verification must block")
+			}
+			var msg string
+			for _, ev := range drainEvents(rec) {
+				if strings.Contains(ev, "PartialCleanup") {
+					msg = ev
+				}
+			}
+			if msg == "" {
+				t.Fatal("expected a PartialCleanup warning")
+			}
+			if n := strings.Count(msg, stage); n != 1 {
+				t.Errorf("blocked stage must be stated once, found %d times in %q", n, msg)
+			}
+			if !strings.Contains(msg, "classified Mirror") {
+				t.Errorf("message must carry the cause, got %q", msg)
+			}
+			if got := strings.Contains(msg, "schema subject deletion"); got != tc.wantSubject {
+				t.Errorf("schema subject deletion listed = %v, want %v: %q", got, tc.wantSubject, msg)
+			}
+			if !strings.Contains(msg, "not run: DeleteTopic") {
+				t.Errorf("DeleteTopic must be listed as not run: %q", msg)
+			}
+		})
 	}
 }

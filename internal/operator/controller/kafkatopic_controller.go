@@ -512,10 +512,21 @@ func (r *KafkaTopicReconciler) finalVerify(ctx context.Context, verify topicVeri
 // verification that did not allow the next cleanup stage.
 func finalVerifyBlocked(stage, topicName string, class mirror.Classification, err error) error {
 	if err != nil {
-		return fmt.Errorf("%w at %s: Kafka topic %q: %w", errDeletionBlocked, stage, topicName, err)
+		return fmt.Errorf("%w at %s: %s: %w", errDeletionBlocked, stage, topicLabel(topicName), err)
 	}
-	return fmt.Errorf("%w at %s: Kafka topic %q is classified %s", errDeletionBlocked, stage, topicName, class)
+	return fmt.Errorf("%w at %s: %s", errDeletionBlocked, stage, verifyBlockCause(topicName, class, nil))
 }
+
+// verifyBlockCause describes why a final verification blocked, without the
+// stage (callers name it once).
+func verifyBlockCause(topicName string, class mirror.Classification, err error) string {
+	if err != nil {
+		return topicLabel(topicName) + ": " + err.Error()
+	}
+	return fmt.Sprintf("%s is classified %s", topicLabel(topicName), class)
+}
+
+func topicLabel(topicName string) string { return fmt.Sprintf("Kafka topic %q", topicName) }
 
 // handleDeletion is the KafkaTopic finalizer decision ladder (mirror-topics
 // design v6, "Decision precedence and co-claimant semantics"). It runs after
@@ -533,9 +544,9 @@ func finalVerifyBlocked(stage, topicName string, class mirror.Classification, er
 //     a failed scan is never a negative result.
 //  3. No claimant but no allow-delete approval: DeleteNotApproved, finalizer
 //     retained, requeue at the resync cadence.
-//  4. Only now build the Kafka/SR and REST clients (a build failure takes
-//     handleUnreachableDeletion) and run the cleanup in
-//     handleDeletionWithClient.
+//  4. Only now build the Kafka/SR and REST clients (a Kafka/SR build failure
+//     takes handleUnreachableDeletion; a REST build failure is DeleteBlocked
+//     with its cause) and run the cleanup in handleDeletionWithClient.
 //
 // Like the rest of the deletion path it takes no identity lock.
 func (r *KafkaTopicReconciler) handleDeletion(ctx context.Context, topic *v1alpha1.KafkaTopic, cluster *v1alpha1.KafkaCluster, clusterNS string) (ctrl.Result, error) {
@@ -586,11 +597,15 @@ func (r *KafkaTopicReconciler) handleDeletion(ctx context.Context, topic *v1alph
 	}
 	defer cleanup()
 	// Kafka REST client for the mirror-state preflight; nil when the cluster
-	// has no spec.rest (legacy deletion behavior).
+	// has no spec.rest (legacy deletion behavior). A build failure is a
+	// configuration or credential problem, not an unreachable cluster: report
+	// it as DeleteBlocked with its cause, keep the finalizer and retry.
 	rest, rberr := r.Clients.RESTFor(ctx, cluster)
 	if rberr != nil {
 		log.FromContext(ctx).Error(rberr, "building cluster REST client for deletion cleanup")
-		return r.handleUnreachableDeletion(ctx, topic)
+		err := fmt.Errorf("Kafka REST client build failed: %w", rberr) //nolint:staticcheck // ST1005: "Kafka" is a product name
+		r.finalizeEvent(topic, corev1.EventTypeWarning, reasonDeleteBlocked, err.Error())
+		return ctrl.Result{}, err // requeue with backoff, finalizer retained
 	}
 	resolver := &operator.K8sResolver{Client: r.Client, Namespace: topic.Namespace, Ctx: ctx}
 	return r.handleDeletionWithClient(ctx, topic, k, sr, rest, resolver, cluster, clusterNS)
@@ -670,7 +685,8 @@ func (r *KafkaTopicReconciler) handleDeletionWithClient(ctx context.Context, top
 			return mirror.VerifyTopic(vctx, k, rest, name)
 		}
 	}
-	if err := r.deleteTopicState(ctx, topic, k, sr, resolver, cluster, clusterNS, verify, preflight); err != nil {
+	topicAbsent, err := r.deleteTopicState(ctx, topic, k, sr, resolver, cluster, clusterNS, verify, preflight)
+	if err != nil {
 		reason := "DeleteFailed"
 		if errors.Is(err, errDeletionBlocked) {
 			reason = reasonDeleteBlocked
@@ -678,7 +694,11 @@ func (r *KafkaTopicReconciler) handleDeletionWithClient(ctx context.Context, top
 		r.finalizeEvent(topic, corev1.EventTypeWarning, reason, err.Error())
 		return ctrl.Result{}, err // requeue, finalizer retained
 	}
-	r.finalizeEvent(topic, corev1.EventTypeNormal, "Deleted", "topic, managed ACLs, and managed schema subjects deleted")
+	msg := "topic, managed ACLs, and managed schema subjects deleted"
+	if topicAbsent {
+		msg = "topic already absent; managed ACLs and schema subjects deleted"
+	}
+	r.finalizeEvent(topic, corev1.EventTypeNormal, "Deleted", msg)
 	return r.removeFinalizer(ctx, topic)
 }
 
@@ -737,11 +757,11 @@ func (r *KafkaTopicReconciler) handleDeletionWithClient(ctx context.Context, top
 //     recreated.
 //
 // The deferred unlock releases the lock on every one of these paths.
-func (r *KafkaTopicReconciler) deleteTopicState(ctx context.Context, topic *v1alpha1.KafkaTopic, k kafka.AdminClient, sr schemaregistry.Client, resolver secrets.Resolver, cluster *v1alpha1.KafkaCluster, clusterNS string, verify topicVerifier, preflight mirror.Classification) error {
+func (r *KafkaTopicReconciler) deleteTopicState(ctx context.Context, topic *v1alpha1.KafkaTopic, k kafka.AdminClient, sr schemaregistry.Client, resolver secrets.Resolver, cluster *v1alpha1.KafkaCluster, clusterNS string, verify topicVerifier, preflight mirror.Classification) (topicAbsent bool, err error) {
 	logger := log.FromContext(ctx)
 	if verify != nil && !deletableClass(preflight) {
 		// Defensive: the caller only passes a deletable preflight class.
-		return fmt.Errorf("%w: preflight classification %q of topic %q does not allow deletion",
+		return false, fmt.Errorf("%w: preflight classification %q of topic %q does not allow deletion",
 			errDeletionBlocked, preflight, topic.ResolvedTopicName())
 	}
 	// Serialize the finalizer's ACL cleanup against every other ACL writer on
@@ -772,14 +792,15 @@ func (r *KafkaTopicReconciler) deleteTopicState(ctx context.Context, topic *v1al
 	// co-ownership view compiles every other CR.
 	defaulting.Topic(topic, nil)
 	desiredACLs, _ := access.BuildDesiredSet(access.CompileTopic(topic))
-	desiredACLs, err := shieldACLDeletion(ctx, r.Client, topic.Spec.ClusterRef.Name,
+	desiredACLs, err = shieldACLDeletion(ctx, r.Client, topic.Spec.ClusterRef.Name,
 		clusterNS, r.ClusterNamespace == "", cluster, desiredACLs,
 		func(reason, msg string) { r.finalizeEvent(topic, corev1.EventTypeNormal, reason, msg) })
 	if err != nil {
-		return err
+		return false, err
 	}
 	topicName := topic.Spec.TopicName
-	topicAbsent := false // a final verification confirmed Absent: skip DeleteTopic
+	// topicAbsent: a final verification confirmed Absent, so DeleteTopic is
+	// skipped and the caller reports the topic as already absent.
 
 	// Preflight Absent: verify before the first destructive action.
 	if verify != nil && preflight == mirror.Absent {
@@ -789,10 +810,10 @@ func (r *KafkaTopicReconciler) deleteTopicState(ctx context.Context, topic *v1al
 		case verr == nil && class == mirror.Absent:
 			topicAbsent = true
 		case verr == nil && (class == mirror.Normal || class == mirror.StoppedFormerMirror):
-			return fmt.Errorf("%w at %s: Kafka topic %q is now %s: topic appeared during deletion; retrying from preflight",
+			return false, fmt.Errorf("%w at %s: Kafka topic %q is now %s: topic appeared during deletion; retrying from preflight",
 				errDeletionBlocked, stage, topicName, class)
 		default:
-			return finalVerifyBlocked(stage, topicName, class, verr)
+			return false, finalVerifyBlocked(stage, topicName, class, verr)
 		}
 	}
 
@@ -807,7 +828,7 @@ func (r *KafkaTopicReconciler) deleteTopicState(ctx context.Context, topic *v1al
 			})
 		}
 		if err := k.DeleteACLs(ctx, states); err != nil {
-			return err
+			return false, err
 		}
 		aclsDeleted = len(states)
 	}
@@ -825,18 +846,22 @@ func (r *KafkaTopicReconciler) deleteTopicState(ctx context.Context, topic *v1al
 		default:
 			blocked := finalVerifyBlocked(stage, topicName, class, verr)
 			if aclsDeleted > 0 {
+				notRun := "DeleteTopic"
+				if sr != nil && topic.Spec.Schema != nil {
+					notRun += ", schema subject deletion"
+				}
 				msg := fmt.Sprintf("partial deletion cleanup of Kafka topic %q: completed stages: ACL deletion "+
-					"(%d tuples revoked); blocked stage: %s (%v); not run: DeleteTopic, schema subject deletion. "+
-					"Revoked ACLs are not recreated", topicName, aclsDeleted, stage, blocked)
+					"(%d tuples revoked); blocked stage: %s (%s); not run: %s. Revoked ACLs are not recreated",
+					topicName, aclsDeleted, stage, verifyBlockCause(topicName, class, verr), notRun)
 				r.finalizeEvent(topic, corev1.EventTypeWarning, reasonPartialCleanup, msg)
 			}
-			return blocked
+			return false, blocked
 		}
 	}
 
 	if !topicAbsent {
 		if err := k.DeleteTopic(ctx, topicName); err != nil {
-			return err
+			return false, err
 		}
 	}
 
@@ -847,7 +872,7 @@ func (r *KafkaTopicReconciler) deleteTopicState(ctx context.Context, topic *v1al
 	// managed by monedula, not the content (spec §12.2). Deleting those subjects
 	// would remove versions registered out-of-band by the producer's pipeline.
 	if sr == nil || topic.Spec.Schema == nil {
-		return nil // no schema registry or no schema block: nothing to do
+		return topicAbsent, nil // no schema registry or no schema block: nothing to do
 	}
 	// sr == nil is the only guard ManagedSubjects does not own; schema-nil and governance-mode are handled inside it.
 
@@ -861,7 +886,7 @@ func (r *KafkaTopicReconciler) deleteTopicState(ctx context.Context, topic *v1al
 		msg := "could not compute managed subjects for deletion (schema body unresolvable): " + err.Error()
 		logger.Error(err, "subject deletion skipped", "topic", topic.Spec.TopicName)
 		r.finalizeEvent(topic, corev1.EventTypeWarning, "SubjectDeletionFailed", msg)
-		return nil // do not block finalization
+		return topicAbsent, nil // do not block finalization
 	}
 	for _, subj := range subjects {
 		if derr := sr.DeleteSubject(ctx, subj); derr != nil {
@@ -871,7 +896,7 @@ func (r *KafkaTopicReconciler) deleteTopicState(ctx context.Context, topic *v1al
 			// Continue: do not block finalization even if one subject fails.
 		}
 	}
-	return nil
+	return topicAbsent, nil
 }
 
 // removeFinalizer drops the finalizer and persists it, letting Kubernetes
