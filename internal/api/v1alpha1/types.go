@@ -815,7 +815,7 @@ type KafkaMirrorTopicList struct {
 // +kubebuilder:validation:XValidation:rule="self.clusterRef.name == oldSelf.clusterRef.name",message="spec.clusterRef.name is immutable"
 // +kubebuilder:validation:XValidation:rule="self.linkName == oldSelf.linkName",message="spec.linkName is immutable"
 // +kubebuilder:validation:XValidation:rule="self.sourceTopicName == oldSelf.sourceTopicName",message="spec.sourceTopicName is immutable"
-// +kubebuilder:validation:XValidation:rule="((has(oldSelf.topicName) && oldSelf.topicName != '') ? oldSelf.topicName : oldSelf.sourceTopicName) == ((has(self.topicName) && self.topicName != '') ? self.topicName : self.sourceTopicName)",message="the effective destination topic name is immutable (a different name needs a new KafkaMirrorTopic)"
+// +kubebuilder:validation:XValidation:rule="((has(oldSelf.topicName) && oldSelf.topicName.size() > 0) ? oldSelf.topicName : oldSelf.sourceTopicName) == ((has(self.topicName) && self.topicName.size() > 0) ? self.topicName : self.sourceTopicName)",message="the effective destination topic name is immutable (a different name needs a new KafkaMirrorTopic)"
 type KafkaMirrorTopicSpec struct {
 	ClusterRef      ClusterRef `json:"clusterRef"`
 	LinkName        string     `json:"linkName"`

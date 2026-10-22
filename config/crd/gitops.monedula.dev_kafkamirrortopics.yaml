@@ -113,9 +113,9 @@ spec:
               rule: self.sourceTopicName == oldSelf.sourceTopicName
             - message: the effective destination topic name is immutable (a different
                 name needs a new KafkaMirrorTopic)
-              rule: '((has(oldSelf.topicName) && oldSelf.topicName != '''') ? oldSelf.topicName
-                : oldSelf.sourceTopicName) == ((has(self.topicName) && self.topicName
-                != '''') ? self.topicName : self.sourceTopicName)'
+              rule: '((has(oldSelf.topicName) && oldSelf.topicName.size() > 0) ? oldSelf.topicName
+                : oldSelf.sourceTopicName) == ((has(self.topicName) && self.topicName.size()
+                > 0) ? self.topicName : self.sourceTopicName)'
           status:
             description: KafkaMirrorTopicStatus is the observed state of a KafkaMirrorTopic.
             properties:
