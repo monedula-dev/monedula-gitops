@@ -20,6 +20,11 @@ const RoleBindingClusterRefNameIndex = index.RoleBindingClusterRefNameIndex
 // internal/operator/index for this package's validators and their tests.
 const UserClusterRefNameIndex = index.UserClusterRefNameIndex
 
+// MirrorTopicClusterRefNameIndex is the manager cache field-index key on a
+// KafkaMirrorTopic's spec.clusterRef.name - re-exported from
+// internal/operator/index for this package's validators and their tests.
+const MirrorTopicClusterRefNameIndex = index.MirrorTopicClusterRefNameIndex
+
 // RegisterIndexes forwards to index.RegisterIndexes, the single registration
 // of the shared spec.clusterRef.name field indexes. Kept so historical
 // callers of the webhook package keep working; new code should call
@@ -78,6 +83,17 @@ func (v *KafkaRoleBindingValidator) SetupWithManager(mgr ctrl.Manager) error {
 // ValidatingWebhookConfiguration points at the right path).
 func (v *KafkaUserValidator) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr, &v1alpha1.KafkaUser{}).
+		WithValidator(v).
+		Complete()
+}
+
+// SetupWithManager registers the KafkaMirrorTopic validating webhook with mgr.
+// The generated webhook path is
+// /validate-gitops-monedula-dev-v1alpha1-kafkamirrortopic (kept consistent with
+// the +kubebuilder:webhook marker so the generated ValidatingWebhookConfiguration
+// points at the right path).
+func (v *KafkaMirrorTopicValidator) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewWebhookManagedBy(mgr, &v1alpha1.KafkaMirrorTopic{}).
 		WithValidator(v).
 		Complete()
 }

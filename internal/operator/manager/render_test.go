@@ -131,27 +131,30 @@ func TestHelmChartCRDsMatchConfig(t *testing.T) {
 }
 
 // TestHelmAndKustomizeWebhookAgree asserts the webhook config matches across the
-// chart, the kustomize overlay, and the operator marker paths. All five
-// webhooks — KafkaTopic, KafkaQuota, KafkaAccessPolicy, KafkaRoleBinding, and
-// KafkaUser — must render in each.
+// chart, the kustomize overlay, and the operator marker paths. All six
+// webhooks — KafkaTopic, KafkaQuota, KafkaAccessPolicy, KafkaRoleBinding, KafkaUser, and
+// KafkaMirrorTopic — must render in each.
 func TestHelmAndKustomizeWebhookAgree(t *testing.T) {
 	const topicPath = "/validate-gitops-monedula-dev-v1alpha1-kafkatopic"
 	const quotaPath = "/validate-gitops-monedula-dev-v1alpha1-kafkaquota"
 	const policyPath = "/validate-gitops-monedula-dev-v1alpha1-kafkaaccesspolicy"
 	const roleBindingPath = "/validate-gitops-monedula-dev-v1alpha1-kafkarolebinding"
 	const userPath = "/validate-gitops-monedula-dev-v1alpha1-kafkauser"
+	const mirrorPath = "/validate-gitops-monedula-dev-v1alpha1-kafkamirrortopic"
 	helmOn := helmTemplate(t, "webhook.enabled=true")
 	require.Contains(t, helmOn, topicPath)
 	require.Contains(t, helmOn, quotaPath)
 	require.Contains(t, helmOn, policyPath)
 	require.Contains(t, helmOn, roleBindingPath)
 	require.Contains(t, helmOn, userPath)
+	require.Contains(t, helmOn, mirrorPath)
 	require.Contains(t, helmOn, "failurePolicy: Fail")
 	require.Contains(t, helmOn, "vkafkatopic.gitops.monedula.dev")
 	require.Contains(t, helmOn, "vkafkaquota.gitops.monedula.dev")
 	require.Contains(t, helmOn, "vkafkaaccesspolicy.gitops.monedula.dev")
 	require.Contains(t, helmOn, "vkafkarolebinding.gitops.monedula.dev")
 	require.Contains(t, helmOn, "vkafkauser.gitops.monedula.dev")
+	require.Contains(t, helmOn, "vkafkamirrortopic.gitops.monedula.dev")
 
 	kust := kustomizeBuild(t, "config/overlays/webhook")
 	require.Contains(t, kust, topicPath)
@@ -159,11 +162,13 @@ func TestHelmAndKustomizeWebhookAgree(t *testing.T) {
 	require.Contains(t, kust, policyPath)
 	require.Contains(t, kust, roleBindingPath)
 	require.Contains(t, kust, userPath)
+	require.Contains(t, kust, mirrorPath)
 	require.Contains(t, kust, "vkafkatopic.gitops.monedula.dev")
 	require.Contains(t, kust, "vkafkaquota.gitops.monedula.dev")
 	require.Contains(t, kust, "vkafkaaccesspolicy.gitops.monedula.dev")
 	require.Contains(t, kust, "vkafkarolebinding.gitops.monedula.dev")
 	require.Contains(t, kust, "vkafkauser.gitops.monedula.dev")
+	require.Contains(t, kust, "vkafkamirrortopic.gitops.monedula.dev")
 	require.Contains(t, kust, "failurePolicy: Fail")
 }
 

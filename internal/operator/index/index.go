@@ -7,7 +7,7 @@
 // fixes). The webhook package re-exports the names it historically declared,
 // so existing references keep working.
 //
-// All five indexes share the same field-path string — the field indexer is
+// All six indexes share the same field-path string — the field indexer is
 // keyed per object TYPE, so they do not collide.
 package index
 
@@ -47,15 +47,20 @@ const RoleBindingClusterRefNameIndex = "spec.clusterRef.name"
 // ClusterRefNameIndex). Registered unconditionally in RegisterIndexes.
 const UserClusterRefNameIndex = "spec.clusterRef.name"
 
+// MirrorTopicClusterRefNameIndex is the manager cache field-index key on a
+// KafkaMirrorTopic's spec.clusterRef.name (the KafkaMirrorTopic analogue of
+// ClusterRefNameIndex). Registered unconditionally in RegisterIndexes.
+const MirrorTopicClusterRefNameIndex = "spec.clusterRef.name"
+
 // RegisterIndexes registers the manager-cache field indexes on KafkaTopic,
-// KafkaQuota, KafkaAccessPolicy, KafkaRoleBinding, and KafkaUser
+// KafkaQuota, KafkaAccessPolicy, KafkaRoleBinding, KafkaUser, and KafkaMirrorTopic
 // spec.clusterRef.name (ClusterRefNameIndex / QuotaClusterRefNameIndex /
 // PolicyClusterRefNameIndex / RoleBindingClusterRefNameIndex /
-// UserClusterRefNameIndex).
+// UserClusterRefNameIndex / MirrorTopicClusterRefNameIndex).
 // The indexes let the webhook validators (and controllers) List by cluster
 // ref efficiently. They are cheap and registered unconditionally —
 // independent of whether webhooks are enabled — so the cache always carries
-// them. All five indexes share the same field-path string but are keyed per
+// them. All six indexes share the same field-path string but are keyed per
 // object TYPE, so they do not collide. Call once, before mgr.Start.
 func RegisterIndexes(ctx context.Context, mgr ctrl.Manager) error {
 	if err := mgr.GetFieldIndexer().IndexField(ctx, &v1alpha1.KafkaTopic{}, ClusterRefNameIndex,
@@ -98,12 +103,22 @@ func RegisterIndexes(ctx context.Context, mgr ctrl.Manager) error {
 		}); err != nil {
 		return err
 	}
-	return mgr.GetFieldIndexer().IndexField(ctx, &v1alpha1.KafkaUser{}, UserClusterRefNameIndex,
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &v1alpha1.KafkaUser{}, UserClusterRefNameIndex,
 		func(obj client.Object) []string {
 			u, ok := obj.(*v1alpha1.KafkaUser)
 			if !ok {
 				return nil
 			}
 			return []string{u.Spec.ClusterRef.Name}
+		}); err != nil {
+		return err
+	}
+	return mgr.GetFieldIndexer().IndexField(ctx, &v1alpha1.KafkaMirrorTopic{}, MirrorTopicClusterRefNameIndex,
+		func(obj client.Object) []string {
+			m, ok := obj.(*v1alpha1.KafkaMirrorTopic)
+			if !ok {
+				return nil
+			}
+			return []string{m.Spec.ClusterRef.Name}
 		})
 }

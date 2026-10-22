@@ -229,6 +229,32 @@ func (v *KafkaTopicValidator) checkIdentityUnique(ctx context.Context, topic *v1
 			topic.Namespace, topic.Name, other.Namespace, other.Name,
 			wantName, wantClusterRef, wantClusterNS)
 	}
+
+	// Cross-kind: a KafkaMirrorTopic claiming the same effective name on the
+	// same resolved cluster also occupies the identity.
+	var mirrors v1alpha1.KafkaMirrorTopicList
+	if err := v.Reader.List(ctx, &mirrors,
+		client.MatchingFields{index.MirrorTopicClusterRefNameIndex: wantClusterRef},
+	); err != nil {
+		return fmt.Errorf("listing KafkaMirrorTopics for identity check: %w", err)
+	}
+	for i := range mirrors.Items {
+		other := &mirrors.Items[i]
+		if other.Spec.EffectiveTopicName() != wantName {
+			continue
+		}
+		otherNS := other.Namespace
+		if v.ClusterNamespace != "" {
+			otherNS = v.ClusterNamespace
+		}
+		if otherNS != wantClusterNS {
+			continue
+		}
+		return fmt.Errorf(
+			"KafkaTopic %s/%s conflicts with KafkaMirrorTopic %s/%s: both claim topic %q on cluster %q (namespace %q); topic identity (cluster, topicName) must be unique (spec §5.3)",
+			topic.Namespace, topic.Name, other.Namespace, other.Name,
+			wantName, wantClusterRef, wantClusterNS)
+	}
 	return nil
 }
 
