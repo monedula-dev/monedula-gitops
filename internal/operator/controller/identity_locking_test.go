@@ -15,6 +15,7 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/api/v1alpha1"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
 	kafkamock "github.com/monedula-dev/monedula-gitops/internal/kafka/mock"
+	"github.com/monedula-dev/monedula-gitops/internal/kafkarest"
 	"github.com/monedula-dev/monedula-gitops/internal/mds"
 	"github.com/monedula-dev/monedula-gitops/internal/operator/locking"
 	"github.com/monedula-dev/monedula-gitops/internal/schemaregistry"
@@ -98,6 +99,10 @@ func (f *sequenceFactory) For(context.Context, *v1alpha1.KafkaCluster) (kafka.Ad
 	c := f.clients[f.next%len(f.clients)]
 	f.next++
 	return c, nil, func() {}, nil
+}
+
+func (f *sequenceFactory) RESTFor(context.Context, *v1alpha1.KafkaCluster) (kafkarest.Client, error) {
+	return nil, nil
 }
 
 func (f *sequenceFactory) MDSFor(context.Context, *v1alpha1.KafkaCluster) (mds.Client, error) {

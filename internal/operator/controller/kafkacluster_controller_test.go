@@ -17,6 +17,7 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/api/v1alpha1"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
 	kafkamock "github.com/monedula-dev/monedula-gitops/internal/kafka/mock"
+	"github.com/monedula-dev/monedula-gitops/internal/kafkarest"
 	"github.com/monedula-dev/monedula-gitops/internal/mds"
 	"github.com/monedula-dev/monedula-gitops/internal/schemaregistry"
 )
@@ -29,11 +30,13 @@ var (
 )
 
 type stubFactory struct {
-	k      kafka.AdminClient
-	sr     schemaregistry.Client
-	mds    mds.Client
-	err    error
-	mdsErr error
+	k       kafka.AdminClient
+	sr      schemaregistry.Client
+	mds     mds.Client
+	err     error
+	mdsErr  error
+	rest    kafkarest.Client
+	restErr error
 }
 
 func (f stubFactory) For(context.Context, *v1alpha1.KafkaCluster) (kafka.AdminClient, schemaregistry.Client, func(), error) {
@@ -42,6 +45,10 @@ func (f stubFactory) For(context.Context, *v1alpha1.KafkaCluster) (kafka.AdminCl
 
 func (f stubFactory) MDSFor(context.Context, *v1alpha1.KafkaCluster) (mds.Client, error) {
 	return f.mds, f.mdsErr
+}
+
+func (f stubFactory) RESTFor(context.Context, *v1alpha1.KafkaCluster) (kafkarest.Client, error) {
+	return f.rest, f.restErr
 }
 
 func newScheme(t *testing.T) *runtime.Scheme {

@@ -18,6 +18,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/monedula-dev/monedula-gitops/internal/httpretry"
@@ -67,8 +68,9 @@ func MTLSAuth() *Auth {
 
 // Client talks to the Kafka REST v3 API over HTTP.
 type Client struct {
-	baseURL   string   // endpoint without trailing slash, without /v3
-	base      *url.URL // parsed baseURL, used to validate pagination links
+	baseURL   string     // endpoint without trailing slash, without /v3
+	base      *url.URL   // parsed baseURL, used to validate pagination links
+	idMu      sync.Mutex // guards clusterID
 	clusterID string
 	auth      *Auth
 	http      *http.Client
@@ -97,7 +99,14 @@ func New(endpoint, clusterID string, auth *Auth, httpClient *http.Client) (*Clie
 	}
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: defaultTimeout}
+	} else {
+		// Copy so the caller's client is not mutated.
+		cp := *httpClient
+		httpClient = &cp
 	}
+	// A redirect is never followed (it could leak credentials to another
+	// host); it surfaces as a non-2xx error.
+	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &Client{baseURL: endpoint, base: u, clusterID: clusterID, auth: auth, http: httpClient}, nil
 }
 
@@ -113,7 +122,7 @@ func (c *Client) get(ctx context.Context, fullURL string, out any) (int, error) 
 		c.applyAuth(req)
 		return req, nil
 	}
-	resp, err := httpretry.Do(ctx, c.http, newReq, true)
+	resp, err := httpretry.Do(ctx, c.http, newReq, !kafkarest.RetryDisabled(ctx))
 	if err != nil {
 		// Never wrap with credentials.
 		return 0, fmt.Errorf("kafkarest: request failed: %w", err)
@@ -248,6 +257,8 @@ func listAll[T any](ctx context.Context, c *Client, relPath string) ([]T, error)
 // discovers it with GET /v3/clusters, requiring exactly one result. A
 // discovered ID is cached; failures are not.
 func (c *Client) ClusterID(ctx context.Context) (string, error) {
+	c.idMu.Lock()
+	defer c.idMu.Unlock()
 	if c.clusterID != "" {
 		return c.clusterID, nil
 	}

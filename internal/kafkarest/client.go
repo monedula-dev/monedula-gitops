@@ -7,6 +7,20 @@ import (
 	"errors"
 )
 
+type retryDisabledKey struct{}
+
+// WithoutRetry returns a context that tells the client to make a single attempt
+// per request: no retries, no backoff, no Retry-After sleep.
+func WithoutRetry(ctx context.Context) context.Context {
+	return context.WithValue(ctx, retryDisabledKey{}, true)
+}
+
+// RetryDisabled reports whether ctx was derived with WithoutRetry.
+func RetryDisabled(ctx context.Context) bool {
+	v, _ := ctx.Value(retryDisabledKey{}).(bool)
+	return v
+}
+
 // ErrNotFound is returned when the REST API reports 404 for a requested object.
 var ErrNotFound = errors.New("kafkarest: not found")
 

@@ -29,6 +29,7 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/api/v1alpha1"
 	"github.com/monedula-dev/monedula-gitops/internal/cluster"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
+	"github.com/monedula-dev/monedula-gitops/internal/kafkarest"
 	"github.com/monedula-dev/monedula-gitops/internal/mds"
 	"github.com/monedula-dev/monedula-gitops/internal/operator"
 	"github.com/monedula-dev/monedula-gitops/internal/operator/reconcile"
@@ -52,6 +53,10 @@ type ClientFactory interface {
 	// MDSFor builds the MDS client for c. Returns (nil, nil) when the cluster
 	// has no authorization.mds configured — callers must nil-guard the result.
 	MDSFor(ctx context.Context, c *v1alpha1.KafkaCluster) (mds.Client, error)
+	// RESTFor builds the Kafka REST client for c, resolving credentials afresh
+	// on every call so Secret rotations take effect. Returns (nil, nil) when
+	// the cluster has no spec.rest.
+	RESTFor(ctx context.Context, c *v1alpha1.KafkaCluster) (kafkarest.Client, error)
 }
 
 // KafkaClusterReconciler reconciles a KafkaCluster. It performs readiness/status
@@ -230,6 +235,12 @@ func (f *DefaultClientFactory) For(ctx context.Context, c *v1alpha1.KafkaCluster
 func (f *DefaultClientFactory) MDSFor(ctx context.Context, c *v1alpha1.KafkaCluster) (mds.Client, error) {
 	res := &operator.K8sResolver{Client: f.Client, Namespace: c.Namespace, Ctx: ctx}
 	return cluster.BuildMDSClient(c, res)
+}
+
+// RESTFor resolves the cluster's secrets from its own namespace and builds the
+// Kafka REST client. Returns (nil, nil) when the cluster has no spec.rest.
+func (f *DefaultClientFactory) RESTFor(ctx context.Context, c *v1alpha1.KafkaCluster) (kafkarest.Client, error) {
+	return cluster.BuildKafkaRESTClient(c, &operator.K8sResolver{Client: f.Client, Namespace: c.Namespace, Ctx: ctx})
 }
 
 // mapSecretToClusters enqueues the KafkaCluster(s) in the Secret's namespace
