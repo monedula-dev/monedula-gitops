@@ -70,6 +70,20 @@ spec:
           env: %s
 `, env.srURL, envSRKey, envSRSecret)
 	}
+	if env.hasREST {
+		fmt.Fprintf(&b, `  rest:
+    endpoint: %s
+    clusterId: %s
+    auth:
+      type: basic
+      username:
+        valueFrom:
+          env: %s
+      password:
+        valueFrom:
+          env: %s
+`, env.restEndpoint, env.clusterID, envRESTKey, envRESTSecret)
+	}
 	path := filepath.Join(dir, "cluster.yaml")
 	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
 		t.Fatalf("writing cluster config: %v", err)
@@ -145,6 +159,21 @@ func topicYAMLSchemaV2(topic, retentionMS string) string {
 func topicYAMLWithMinISR(topic, retentionMS, minISR string) string {
 	return topicYAML(topic, retentionMS, false) +
 		fmt.Sprintf("    min.insync.replicas: \"%s\"\n", minISR)
+}
+
+// mirrorTopicYAML renders a KafkaMirrorTopic with no topicName, so the
+// destination topic takes the source topic's name.
+func mirrorTopicYAML(name, link, source string) string {
+	return fmt.Sprintf(`apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaMirrorTopic
+metadata:
+  name: %s
+spec:
+  clusterRef:
+    name: cloud
+  linkName: %s
+  sourceTopicName: %s
+`, name, link, source)
 }
 
 // accessPolicyYAML renders a KafkaAccessPolicy granting the listed operations
@@ -318,6 +347,20 @@ func cleanupTopic(t *testing.T, admin *franz.Client, runPrefix, topic string) {
 		}
 		t.Logf("cleanup: deleted topic %s", topic)
 	})
+}
+
+// deleteMirrorDestination deletes the mirror destination topic through the
+// Kafka Admin API and returns a note recording the outcome. A failure is
+// returned (and surfaced in the summary table), never swallowed.
+func deleteMirrorDestination(t *testing.T, admin *franz.Client, dest string) string {
+	ctx, cancel := adminCtx()
+	defer cancel()
+	if err := admin.DeleteTopic(ctx, dest); err != nil {
+		t.Logf("cleanup: deleting mirror destination topic %s: %v", dest, err)
+		return fmt.Sprintf("CLEANUP FAILED: mirror topic %s not deleted (%v) - remove it manually", dest, err)
+	}
+	t.Logf("cleanup: deleted mirror destination topic %s", dest)
+	return fmt.Sprintf("mirror topic %s created, verified and deleted", dest)
 }
 
 // cleanupACLs registers deletion of every ACL whose resource name carries the
@@ -541,6 +584,22 @@ func verdictRow(surface string, ok bool, skipReason, okNote string) summaryRow {
 		return summaryRow{surface, "OK", okNote}
 	default:
 		return summaryRow{surface, "FAILED", "see subtest logs"}
+	}
+}
+
+// mirrorRow maps the mirror subtest outcome to OK / SKIPPED / FAILED. A
+// recorded cleanup failure is always surfaced, whatever the verdict.
+func mirrorRow(skipReason string, ok bool, note string) summaryRow {
+	cleanupFailed := strings.HasPrefix(note, "CLEANUP FAILED")
+	switch {
+	case skipReason != "":
+		return summaryRow{"Mirrors", "SKIPPED", skipReason}
+	case ok && !cleanupFailed:
+		return summaryRow{"Mirrors", "OK", note}
+	case cleanupFailed:
+		return summaryRow{"Mirrors", "FAILED", note}
+	default:
+		return summaryRow{"Mirrors", "FAILED", "see subtest logs"}
 	}
 }
 
