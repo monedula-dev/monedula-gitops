@@ -43,6 +43,22 @@ func Topic(tp *v1alpha1.KafkaTopic, clusterDefaults *v1alpha1.ClusterDefaults) {
 	}
 }
 
+// MirrorTopic applies defaults to a KafkaMirrorTopic. It deliberately does not
+// write spec.topicName (an empty value means "same as sourceTopicName", and
+// validation/compile need to tell explicit from omitted) and applies no
+// cluster defaults: replication factor stays unset unless declared.
+func MirrorTopic(m *v1alpha1.KafkaMirrorTopic) {
+	if m.Spec.DeletionPolicy == "" {
+		m.Spec.DeletionPolicy = "Orphan"
+	}
+	if m.Spec.Reconciliation == nil {
+		m.Spec.Reconciliation = &v1alpha1.Reconciliation{}
+	}
+	if m.Spec.Reconciliation.Mode == "" {
+		m.Spec.Reconciliation.Mode = "Enforce"
+	}
+}
+
 // Policy applies defaults to a KafkaAccessPolicy.
 func Policy(pol *v1alpha1.KafkaAccessPolicy) {
 	if pol.Spec.DeletionPolicy == "" {

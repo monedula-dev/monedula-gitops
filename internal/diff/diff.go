@@ -57,6 +57,18 @@ func (dt DesiredTopic) ignoresField(field string) bool {
 	return false
 }
 
+// DesiredMirror is a cluster-link mirror topic the manifests declare.
+type DesiredMirror struct {
+	Kind, Namespace, Name string // Name is the resource name (metadata.name)
+	LinkName              string
+	SourceTopicName       string
+	TopicName             string // effective destination name
+	TopicNameExplicit     bool   // spec.topicName was non-empty in the manifest
+	ReplicationFactor     int    // 0 = not declared
+	Config                map[string]string
+	Mode                  string
+}
+
 // DesiredSchema is a schema subject the manifests declare.
 type DesiredSchema struct {
 	Subject       string
@@ -70,6 +82,7 @@ type DesiredSchema struct {
 // Desired is the full set of declared state plus the managed scope derived from it.
 type Desired struct {
 	Topics  []DesiredTopic
+	Mirrors []DesiredMirror // declared cluster-link mirror topics
 	ACLs    []access.ACL
 	Schemas []DesiredSchema
 	Quotas  []quota.Desired // compiled KafkaQuota entities + limit values (spec §39)

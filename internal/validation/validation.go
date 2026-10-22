@@ -3,6 +3,7 @@ package validation
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"path"
 	"regexp"
 	"sort"
@@ -21,6 +22,7 @@ type Input struct {
 	Quotas       []*v1alpha1.KafkaQuota
 	RoleBindings []*v1alpha1.KafkaRoleBinding // shape, clusterRef, MDS-required, and identity checks run in Validate
 	Users        []*v1alpha1.KafkaUser        // shape and (clusterRef, username) identity checks run in Validate
+	MirrorTopics []*v1alpha1.KafkaMirrorTopic // shape, identity (shared with Topics) and spec.rest checks run in Validate
 }
 
 type Error struct{ Msg string }
@@ -623,6 +625,28 @@ func Validate(in Input) []error {
 		}
 	}
 
+	// KafkaMirrorTopic shares the (clusterRef.name, effective topic name)
+	// identity space with KafkaTopic.
+	for _, m := range in.MirrorTopics {
+		name := m.Name
+		errs = append(errs, ValidateMirrorTopicShape(m)...)
+		eff := m.Spec.EffectiveTopicName()
+		key := m.Spec.ClusterRef.Name + "\x00" + eff
+		if prev, dup := seen[key]; dup {
+			errs = append(errs, errf("KafkaMirrorTopic %s collides with %s: both resolve to topic %q on cluster %q", name, prev, eff, m.Spec.ClusterRef.Name))
+		} else {
+			seen[key] = name
+		}
+		if in.Clusters != nil {
+			cl, ok := in.Clusters[m.Spec.ClusterRef.Name]
+			if !ok {
+				errs = append(errs, errf("KafkaMirrorTopic %s references cluster %q, but no KafkaCluster config with that name was provided", name, m.Spec.ClusterRef.Name))
+			} else if cl.Spec.REST == nil {
+				errs = append(errs, errf("KafkaMirrorTopic %s: cluster %q has no spec.rest; mirror topics need Kafka REST v3", name, m.Spec.ClusterRef.Name))
+			}
+		}
+	}
+
 	for _, pol := range in.Policies {
 		name := pol.Name
 		if name == "" {
@@ -800,6 +824,7 @@ func Validate(in Input) []error {
 		if cl.Spec.Authorization != nil && cl.Spec.Authorization.MDS != nil {
 			errs = append(errs, validateTLSShape(k, "authorization.mds.tls", cl.Spec.Authorization.MDS.TLS)...)
 		}
+		errs = append(errs, ValidateClusterREST(cl)...)
 		// auth.mechanism validation (TLS config passed for mTLS checks).
 		if cl.Spec.Auth != nil {
 			errs = append(errs, validateAuthConfig(k, cl.Spec.Auth, cl.Spec.TLS)...)
@@ -968,5 +993,80 @@ func validateTenancyConfig(clusterName string, t *v1alpha1.TenancyConfig) []erro
 		}
 	}
 
+	return errs
+}
+
+// ValidateMirrorTopicShape checks the per-resource shape rules of a
+// KafkaMirrorTopic (shared with the webhook).
+func ValidateMirrorTopicShape(m *v1alpha1.KafkaMirrorTopic) []error {
+	var errs []error
+	name := m.Name
+	if name == "" {
+		errs = append(errs, errf("KafkaMirrorTopic: metadata.name must be non-empty"))
+	}
+	if m.APIVersion != v1alpha1.APIVersion {
+		errs = append(errs, errf("KafkaMirrorTopic %s: apiVersion must be %s", name, v1alpha1.APIVersion))
+	}
+	if m.Spec.ClusterRef.Name == "" {
+		errs = append(errs, errf("KafkaMirrorTopic %s: spec.clusterRef.name is required", name))
+	}
+	if m.Spec.LinkName == "" {
+		errs = append(errs, errf("KafkaMirrorTopic %s: spec.linkName is required", name))
+	}
+	if m.Spec.SourceTopicName == "" {
+		errs = append(errs, errf("KafkaMirrorTopic %s: spec.sourceTopicName is required", name))
+	}
+	if m.Spec.ReplicationFactor != nil && *m.Spec.ReplicationFactor < 1 {
+		errs = append(errs, errf("KafkaMirrorTopic %s: spec.replicationFactor must be >= 1", name))
+	}
+	for k := range m.Spec.Config {
+		if k == "" {
+			errs = append(errs, errf("KafkaMirrorTopic %s: spec.config keys must be non-empty", name))
+			break
+		}
+	}
+	if m.Spec.Reconciliation != nil && m.Spec.Reconciliation.Mode != "" && !validModes[m.Spec.Reconciliation.Mode] {
+		errs = append(errs, errf("KafkaMirrorTopic %s: invalid reconciliation.mode %q", name, m.Spec.Reconciliation.Mode))
+	}
+	if dp := m.Spec.DeletionPolicy; dp != "" && dp != "Orphan" {
+		errs = append(errs, errf("KafkaMirrorTopic %s: deletionPolicy %q is not supported; mirror topics are always orphaned in this version", name, dp))
+	}
+	return errs
+}
+
+// ValidateClusterREST checks the optional spec.rest block of a KafkaCluster.
+func ValidateClusterREST(c *v1alpha1.KafkaCluster) []error {
+	r := c.Spec.REST
+	if r == nil {
+		return nil
+	}
+	var errs []error
+	k := c.Name
+	if r.Endpoint == "" {
+		errs = append(errs, errf("KafkaCluster %s: rest.endpoint is required", k))
+	} else if u, err := url.Parse(r.Endpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		errs = append(errs, errf("KafkaCluster %s: rest.endpoint %q must be an http or https URL", k, r.Endpoint))
+	} else if strings.HasSuffix(strings.TrimRight(u.Path, "/"), "/v3") {
+		errs = append(errs, errf("KafkaCluster %s: rest.endpoint must not include /v3 (the client appends it)", k))
+	}
+	if a := r.Auth; a != nil {
+		switch a.Type {
+		case "basic":
+			if a.Username == nil || a.Password == nil {
+				errs = append(errs, errf("KafkaCluster %s: rest.auth.type basic requires username and password", k))
+			}
+		case "bearer":
+			if a.Token == nil {
+				errs = append(errs, errf("KafkaCluster %s: rest.auth.type bearer requires token", k))
+			}
+		case "mtls":
+			if r.TLS == nil || r.TLS.ClientCert == nil || r.TLS.ClientKey == nil {
+				errs = append(errs, errf("KafkaCluster %s: rest.auth.type mtls requires rest.tls.clientCert and rest.tls.clientKey", k))
+			}
+		default:
+			errs = append(errs, errf("KafkaCluster %s: unknown rest.auth.type %q (must be basic, bearer or mtls)", k, a.Type))
+		}
+	}
+	errs = append(errs, validateTLSShape(k, "rest.tls", r.TLS)...)
 	return errs
 }

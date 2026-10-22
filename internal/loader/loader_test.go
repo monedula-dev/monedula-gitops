@@ -288,3 +288,17 @@ func TestRepoFixturesLoadStrictly(t *testing.T) {
 	}
 	require.NotZero(t, checked, "no fixture files matched our kinds; sweep is a no-op, check globs")
 }
+
+func TestLoaderDecodesMirrorTopicStrict(t *testing.T) {
+	ok := "apiVersion: gitops.monedula.dev/v1alpha1\nkind: KafkaMirrorTopic\nmetadata:\n  name: m\nspec:\n  clusterRef: {name: dr}\n  linkName: l\n  sourceTopicName: t\n"
+	objs, err := Load(Options{Filenames: []string{"-"}, Stdin: strings.NewReader(ok)})
+	require.NoError(t, err)
+	require.Len(t, objs, 1)
+	require.NotNil(t, objs[0].MirrorTopic)
+	require.Equal(t, "t", objs[0].MirrorTopic.Spec.SourceTopicName)
+
+	bad := ok + "  configs: {a: b}\n"
+	_, err = Load(Options{Filenames: []string{"-"}, Stdin: strings.NewReader(bad)})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "configs")
+}
