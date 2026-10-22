@@ -5,6 +5,7 @@ package kafkarest
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
 type retryDisabledKey struct{}
@@ -19,6 +20,21 @@ func WithoutRetry(ctx context.Context) context.Context {
 func RetryDisabled(ctx context.Context) bool {
 	v, _ := ctx.Value(retryDisabledKey{}).(bool)
 	return v
+}
+
+// StatusError is a non-2xx REST response. Code is the HTTP status and ErrorCode
+// is the API's own error_code when the body carries one (otherwise 0).
+type StatusError struct {
+	Code      int
+	ErrorCode int
+	Message   string
+}
+
+func (e *StatusError) Error() string {
+	if e.Message == "" {
+		return fmt.Sprintf("kafkarest: returned status %d", e.Code)
+	}
+	return fmt.Sprintf("kafkarest: returned status %d: %s", e.Code, e.Message)
 }
 
 // ErrNotFound is returned when the REST API reports 404 for a requested object.

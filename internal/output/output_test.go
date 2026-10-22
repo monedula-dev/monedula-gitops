@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -273,4 +274,21 @@ func TestRenderSetQuotaOp(t *testing.T) {
 	require.Contains(t, string(yamlOut), "action: SetQuota")
 	require.Contains(t, string(yamlOut), "kind: KafkaQuota")
 	require.Contains(t, string(yamlOut), "target: client-id=batch,user=svc-checkout")
+}
+
+func TestApplyResultNoDuplicatedStatus(t *testing.T) {
+	op := operations.New(operations.Rejected)
+	op.Kind, op.Name, op.Target = "KafkaMirrorTopic", "orders", "orders"
+	res := executor.Result{Results: []executor.OpResult{{Op: op, Status: executor.Rejected}}}
+	got, err := RenderApplyResult(res, "human", "dr")
+	require.NoError(t, err)
+	line := ""
+	for _, l := range strings.Split(string(got), "\n") {
+		if strings.Contains(l, "KafkaMirrorTopic/orders") {
+			line = l
+		}
+	}
+	require.NotEmpty(t, line)
+	require.Equal(t, 1, strings.Count(line, "Rejected"), line)
+	require.True(t, strings.HasPrefix(line, "Rejected KafkaMirrorTopic/orders"), line)
 }

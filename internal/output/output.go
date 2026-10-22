@@ -153,7 +153,11 @@ func renderApplyResultHuman(res executor.Result, cluster string) []byte {
 	fmt.Fprintf(&buf, "Cluster: %s\n", cluster)
 	for _, r := range res.Results {
 		o := r.Op
-		fmt.Fprintf(&buf, "%s %s %s/%s %s", r.Status, o.Action, o.Kind, o.Name, o.Target)
+		if string(r.Status) == string(o.Action) {
+			fmt.Fprintf(&buf, "%s %s/%s %s", r.Status, o.Kind, o.Name, o.Target)
+		} else {
+			fmt.Fprintf(&buf, "%s %s %s/%s %s", r.Status, o.Action, o.Kind, o.Name, o.Target)
+		}
 		if o.Field != "" {
 			fmt.Fprintf(&buf, " [field=%s %s -> %s]", o.Field, o.From, o.To)
 		}

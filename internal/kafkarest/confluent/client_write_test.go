@@ -2,6 +2,7 @@ package confluent
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -130,5 +131,22 @@ func TestAlterTopicConfigsNotRetriedOn503(t *testing.T) {
 	c := mustNew(t, srv.URL, "c1", nil)
 	if err := c.AlterTopicConfigs(t.Context(), "t", map[string]string{"a": "b"}); err == nil || n.Load() != 1 {
 		t.Fatalf("err=%v requests=%d", err, n.Load())
+	}
+}
+
+func TestCreateMirror4xxIsStatusError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error_code":40403,"message":"source topic not found"}`))
+	}))
+	defer srv.Close()
+	c := mustNew(t, srv.URL, "c1", nil)
+	err := c.CreateMirror(t.Context(), kafkarest.CreateMirrorRequest{LinkName: "l1", SourceTopicName: "a", MirrorTopicName: "a"})
+	var se *kafkarest.StatusError
+	if !errors.As(err, &se) {
+		t.Fatalf("want *kafkarest.StatusError, got %v", err)
+	}
+	if se.Code != 404 || se.ErrorCode != 40403 {
+		t.Fatalf("got Code=%d ErrorCode=%d", se.Code, se.ErrorCode)
 	}
 }

@@ -260,3 +260,28 @@ func TestWriterAlterFailureWrapped(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestWriterCreateDefiniteRejection(t *testing.T) {
+	_, r, w := writerFixture(t)
+	r.Fail("CreateMirror", &kafkarest.StatusError{Code: 404, ErrorCode: 40403, Message: "no such topic"})
+	err := w.CreateMirror(context.Background(), createOp())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "rejected by Kafka REST (404)") || strings.Contains(err.Error(), "outcome unknown") {
+		t.Fatalf("got %q", err.Error())
+	}
+	var se *kafkarest.StatusError
+	if !errors.As(err, &se) {
+		t.Fatalf("StatusError not wrapped: %v", err)
+	}
+}
+
+func TestWriterCreateTransportErrorIsUnknown(t *testing.T) {
+	_, r, w := writerFixture(t)
+	r.Fail("CreateMirror", errors.New("connection reset"))
+	err := w.CreateMirror(context.Background(), createOp())
+	if err == nil || !strings.Contains(err.Error(), "outcome unknown") {
+		t.Fatalf("got %v", err)
+	}
+}
