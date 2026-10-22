@@ -17,6 +17,7 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka/mock"
 	"github.com/monedula-dev/monedula-gitops/internal/kafkarest"
+	restmock "github.com/monedula-dev/monedula-gitops/internal/kafkarest/mock"
 	"github.com/monedula-dev/monedula-gitops/internal/loader"
 	"github.com/monedula-dev/monedula-gitops/internal/operator/manager"
 	"github.com/monedula-dev/monedula-gitops/internal/schemaregistry"
@@ -86,7 +87,12 @@ func newE2ECheckCmd() *cobra.Command {
 				len(exp.LiveState.Users) > 0 ||
 				(exp.LiveState.Absent != nil && (len(exp.LiveState.Absent.Topics) > 0 || len(exp.LiveState.Absent.Users) > 0))
 			needsSubjects := len(exp.LiveState.Subjects) > 0
-			if needsKafka || needsSubjects {
+			var absentMirrors []string
+			if exp.LiveState.Absent != nil {
+				absentMirrors = exp.LiveState.Absent.Mirrors
+			}
+			needsMirrors := len(exp.LiveState.Mirrors) > 0 || len(absentMirrors) > 0
+			if needsKafka || needsSubjects || needsMirrors {
 				if clusterConfig == "" {
 					if mode == "k8s" {
 						// In k8s mode liveState needs a host-reachable broker; without
@@ -120,6 +126,18 @@ func newE2ECheckCmd() *cobra.Command {
 						}
 						cr := e2e.CheckSubjects(ctx, sp, exp.LiveState)
 						rep.Results = append(rep.Results, cr.Results...)
+					}
+					if needsMirrors {
+						rc, rerr := buildRESTClientForE2E(clusterConfig)
+						if rerr != nil {
+							return &ExitError{Code: 2, Msg: rerr.Error()}
+						}
+						if rc == nil {
+							rep.Add(e2e.CheckResult{Name: "mirrors", Detail: "cluster has no spec.rest"})
+						} else {
+							mr := e2e.CheckMirrors(ctx, rc, exp.LiveState.Mirrors, absentMirrors)
+							rep.Results = append(rep.Results, mr.Results...)
+						}
 					}
 				}
 			}
@@ -296,6 +314,14 @@ func buildRESTClientForE2E(clusterConfigPath string) (kafkarest.Client, error) {
 		return nil, fmt.Errorf("%s: %w", clusterConfigPath, err)
 	}
 	dir := filepath.Dir(clusterConfigPath)
+	// Honor the hermetic REST mock annotation, as the plan-based commands do.
+	if rf := kc.Annotations[mockRESTAnnotation]; rf != "" {
+		c, err := restmock.FromFile(filepath.Join(dir, rf))
+		if err != nil {
+			return nil, err
+		}
+		return c, nil
+	}
 	return cluster.BuildKafkaRESTClient(kc, secrets.FileEnvResolver{BaseDir: dir})
 }
 

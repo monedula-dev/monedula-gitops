@@ -3,6 +3,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/monedula-dev/monedula-gitops/internal/kafkarest"
 )
@@ -58,7 +59,7 @@ func CheckMirrors(ctx context.Context, p MirrorProber, want []MirrorExpect, abse
 			diffs = append(diffs, fmt.Sprintf("status: want %q, live %q", w.Status, m.Status))
 		}
 		if len(diffs) > 0 {
-			rep.Add(CheckResult{Name: name, Detail: fmt.Sprint(diffs)})
+			rep.Add(CheckResult{Name: name, Detail: strings.Join(diffs, "; ")})
 			continue
 		}
 		rep.Add(CheckResult{Name: name, Pass: true})
