@@ -14,6 +14,7 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
 	"github.com/monedula-dev/monedula-gitops/internal/loader"
 	"github.com/monedula-dev/monedula-gitops/internal/mds"
+	"github.com/monedula-dev/monedula-gitops/internal/mirror"
 	"github.com/monedula-dev/monedula-gitops/internal/pipeline"
 )
 
@@ -307,6 +308,10 @@ func doctorREST(ctx context.Context, plan *pipeline.Plan, files []string, cl *v1
 	restID, restErr := rc.ClusterID(ctx)
 	if restErr != nil {
 		add("rest", doctorFail, restErr.Error())
+	} else if cl.Spec.REST != nil && cl.Spec.REST.ClusterID != "" {
+		// A configured clusterId is returned without any request, so this
+		// check proves nothing about reachability; rest-mirrors does.
+		add("rest", doctorPass, fmt.Sprintf("clusterId %s (configured; reachability checked by rest-mirrors)", restID))
 	} else {
 		add("rest", doctorPass, restID)
 	}
@@ -351,11 +356,14 @@ func doctorREST(ctx context.Context, plan *pipeline.Plan, files []string, cl *v1
 			prefix = "none"
 		}
 		msg := fmt.Sprintf("state=%s prefix=%s", l.State, prefix)
+		linkErr := mirror.LinkErrorSuffix(l)
 		switch {
+		case l.State == "PAUSED" || l.State == "LINK_PAUSED":
+			add(name, doctorWarn, msg+" (link is paused)"+linkErr)
 		case l.State != "ACTIVE":
-			add(name, doctorFail, msg)
+			add(name, doctorFail, msg+linkErr)
 		case cfg["auto.create.mirror.topics.enable"] == "true":
-			add(name, doctorWarn, msg+" (auto.create.mirror.topics.enable=true; mirrors may be created outside Git)")
+			add(name, doctorWarn, msg+" (auto.create.mirror.topics.enable=true; mirrors may be created outside Git)"+linkErr)
 		default:
 			add(name, doctorPass, msg)
 		}

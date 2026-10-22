@@ -111,3 +111,25 @@ func TestMissingRESTMockFileExit2(t *testing.T) {
 		"--cluster-config-file", filepath.Join(dir, "cluster.yaml"))
 	requireExitCode(t, err, 2)
 }
+
+// A plain KafkaTopic manifest on a cluster with spec.rest: the mirror guard
+// reads Kafka REST, and an unreadable mirror state fails closed.
+func TestVerifyTopicOnlyRestDownExit2(t *testing.T) {
+	out, err := run(t, "verify", "-f", "testdata/mirror/topic-only",
+		"--cluster-config-file", "testdata/clusters/mirror-rest-down-cluster.yaml")
+	requireExitCode(t, err, 2)
+	require.Contains(t, out, "StateReadError")
+	require.Contains(t, err.Error(), "live state could not be read; see StateReadError operations")
+	require.Contains(t, out, "StateReadError KafkaTopic/payments.events")
+	require.Contains(t, out, `cannot read mirror state for topic "payments.events"`)
+	require.NotContains(t, out, "CreateTopic")
+}
+
+func TestDiffTopicOnlyRestHealthy(t *testing.T) {
+	out, err := run(t, "diff", "-f", "testdata/mirror/topic-only",
+		"--cluster-config-file", "testdata/clusters/mirror-cluster.yaml")
+	require.NoError(t, err, out)
+	require.Contains(t, out, "CreateTopic")
+	require.Contains(t, out, "payments.events")
+	require.NotContains(t, out, "StateReadError")
+}

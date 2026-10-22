@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -288,6 +289,10 @@ func computeOps(ctx context.Context, f *sharedFlags, requireClusters bool, rotat
 	if len(plan.DesiredTopics)+len(plan.DesiredMirrors) > 0 {
 		rest, rerr := buildRESTClient(plan, f.clusterConfigFiles)
 		if rerr != nil {
+			var ee *ExitError
+			if errors.As(rerr, &ee) {
+				return plan, clients, cleanup, nil, ee
+			}
 			return plan, clients, cleanup, nil, &ExitError{Code: 2, Msg: rerr.Error()}
 		}
 		if rest != nil {

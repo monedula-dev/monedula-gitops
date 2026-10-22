@@ -12,7 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `verify`, and `import` handle the new `KafkaMirrorTopic` kind (create and alter only; mirrors are
   never deleted or promoted), `KafkaTopic` is guarded against live mirrors, and `doctor` checks
   Kafka REST reachability, cluster-ID binding, mirror listing, and cluster-link state. The
-  `KafkaCluster` spec gains an optional `rest` block (Kafka REST v3 endpoint, auth, TLS).
+  `KafkaCluster` spec gains an optional `rest` block (Kafka REST v3 endpoint, auth, TLS). Once a
+  `KafkaCluster` sets `spec.rest`, `KafkaTopic` diff/apply/verify read Kafka REST to detect mirror
+  topics and fail closed (exit 2) when REST is unavailable. Mirror imports are commonly partial:
+  explicitly set mirror configs are not imported (`MirrorConfigNotImported`) and must be reviewed.
 
 ## [1.0.0] - 2026-10-09
 

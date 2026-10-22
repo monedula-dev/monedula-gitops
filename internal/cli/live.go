@@ -159,8 +159,11 @@ func buildMDSClient(plan *pipeline.Plan, clusterConfigFiles []string) (mds.Clien
 // Hermetic seam: if the selected KafkaCluster carries the mock-rest annotation
 // the client is seeded from that file (path resolved like mock-state).
 // Otherwise a real client is built from spec.rest, resolving credentials via
-// internal/secrets relative to the cluster-config directory. Errors are
-// returned plain; the caller wraps them as ExitError{2}.
+// internal/secrets relative to the cluster-config directory. When several
+// clusters are loaded and none is selected the error is already an
+// *ExitError{Code: 2}; every other error (mock file, spec.rest or credential
+// resolution) is returned plain. Callers pass an *ExitError through unchanged
+// and wrap any other error as ExitError{Code: 2}.
 func buildRESTClient(plan *pipeline.Plan, clusterConfigFiles []string) (kafkarest.Client, error) {
 	if plan.SelectedCluster == "" {
 		return nil, &ExitError{Code: 2, Msg: "multiple clusters loaded; use --cluster to select one"}

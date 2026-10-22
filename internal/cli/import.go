@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -155,6 +156,10 @@ func runImportCluster(cmd *cobra.Command, f *importFlags) error {
 	// unchanged.
 	restClient, err := buildRESTClient(plan, f.clusterConfigFiles)
 	if err != nil {
+		var ee *ExitError
+		if errors.As(err, &ee) {
+			return ee
+		}
 		return &ExitError{Code: 2, Msg: err.Error()}
 	}
 

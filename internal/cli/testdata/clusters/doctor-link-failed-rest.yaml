@@ -1,0 +1,13 @@
+clusterId: dr-cluster-id
+links:
+  - name: legacy-link
+    state: LINK_PAUSED
+    error: NO_ERROR
+    configs:
+      cluster.link.prefix: ""
+  - name: prod-to-dr
+    state: FAILED
+    error: AUTHENTICATION_ERROR
+    configs:
+      cluster.link.prefix: ""
+mirrors: []

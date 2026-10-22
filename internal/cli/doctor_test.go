@@ -280,8 +280,21 @@ func TestDoctorLinkAutoCreateWarns(t *testing.T) {
 	require.True(t, found)
 }
 
-func TestDoctorLinkPausedFails(t *testing.T) {
+func TestDoctorLinkPausedWarns(t *testing.T) {
 	out, err := run(t, "doctor", "--cluster-config-file", "testdata/clusters/doctor-link-paused-cluster.yaml")
+	require.NoError(t, err)
+	require.Contains(t, out, "WARN link:prod-to-dr: state=PAUSED prefix=none (link is paused)")
+}
+
+func TestDoctorLinkNotActiveFailsWithLinkError(t *testing.T) {
+	out, err := run(t, "doctor", "--cluster-config-file", "testdata/clusters/doctor-link-failed-cluster.yaml")
 	requireExitCode(t, err, 2)
-	require.Contains(t, out, "FAIL link:prod-to-dr: state=PAUSED")
+	require.Contains(t, out, "WARN link:legacy-link: state=LINK_PAUSED prefix=none (link is paused)\n")
+	require.Contains(t, out, "FAIL link:prod-to-dr: state=FAILED prefix=none: AUTHENTICATION_ERROR\n")
+}
+
+func TestDoctorRESTConfiguredClusterIDNotContacted(t *testing.T) {
+	out, err := run(t, "doctor", "--cluster-config-file", "testdata/clusters/doctor-rest-clusterid-cluster.yaml")
+	require.NoError(t, err)
+	require.Contains(t, out, "PASS rest: clusterId dr-cluster-id (configured; reachability checked by rest-mirrors)")
 }
