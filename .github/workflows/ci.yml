@@ -42,6 +42,28 @@ jobs:
       # no explicit timeout-minutes is set, so this runs under the GitHub-hosted
       # default job timeout (6h) with plenty of headroom.
       - run: go test -race ./...
+  # The operator's envtest suites (build tag envtest) start a real kube-apiserver
+  # and etcd. Without KUBEBUILDER_ASSETS they skip silently, so the job fails if
+  # any test reports the assets as unavailable rather than passing vacuously.
+  envtest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - name: install envtest assets
+        run: |
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.1
+          echo "KUBEBUILDER_ASSETS=$(setup-envtest use -p path)" >> "$GITHUB_ENV"
+      - name: go test -tags envtest
+        run: |
+          set -o pipefail
+          go test -tags envtest -count=1 -v ./internal/operator/... 2>&1 | tee envtest.log
+          if grep -q "envtest assets unavailable" envtest.log; then
+            echo "envtest suites skipped: KUBEBUILDER_ASSETS was not usable"
+            exit 1
+          fi
   lint:
     runs-on: ubuntu-latest
     steps:
