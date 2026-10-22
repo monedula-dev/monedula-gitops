@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `KafkaCluster` sets `spec.rest`, `KafkaTopic` diff/apply/verify read Kafka REST to detect mirror
   topics and fail closed (exit 2) when REST is unavailable. Mirror imports are commonly partial:
   explicitly set mirror configs are not imported (`MirrorConfigNotImported`) and must be reviewed.
+- **KafkaMirrorTopic (operator):** the operator reconciles `KafkaMirrorTopic` resources (create and
+  alter only; deleting the resource always orphans the Kafka topic), with a validating webhook and
+  Kafka REST based status reporting. New operator flags `--mirror-stall-threshold` (default `30m`,
+  minimum `1m`) and `--finalizer-verification-timeout` (default `5s`, must be above 0 and at most
+  `5m`), exposed in the Helm chart as `mirrorStallThreshold` and `finalizerVerificationTimeout`.
+  Samples: `gitops_v1alpha1_kafkamirrortopic.yaml` and `gitops_v1alpha1_kafkacluster_rest.yaml`.
+- `KafkaTopic` `deletionPolicy: Delete` verification is best effort: an out-of-band promote or
+  failover racing the final check cannot be excluded, so `Orphan` stays the default.
 
 ## [1.0.0] - 2026-10-09
 

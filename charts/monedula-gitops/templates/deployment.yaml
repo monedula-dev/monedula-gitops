@@ -57,6 +57,12 @@ spec:
         {{- with .Values.resyncInterval }}
         - --resync-interval={{ . }}
         {{- end }}
+        {{- with .Values.mirrorStallThreshold }}
+        - --mirror-stall-threshold={{ . }}
+        {{- end }}
+        {{- with .Values.finalizerVerificationTimeout }}
+        - --finalizer-verification-timeout={{ . }}
+        {{- end }}
         {{- with .Values.maxConcurrentReconciles }}
         - --max-concurrent-reconciles={{ . }}
         {{- end }}

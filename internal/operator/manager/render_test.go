@@ -370,3 +370,14 @@ func TestHelmServiceMonitorSecureScheme(t *testing.T) {
 	override := helmTemplate(t, "metrics.serviceMonitor.enabled=true", "metrics.serviceMonitor.scheme=https")
 	require.Contains(t, override, "scheme: https")
 }
+
+// TestHelmDeploymentMirrorFlags asserts the mirror flags render only when set.
+func TestHelmDeploymentMirrorFlags(t *testing.T) {
+	withValues := helmTemplate(t, "mirrorStallThreshold=45m", "finalizerVerificationTimeout=10s")
+	require.Contains(t, withValues, "--mirror-stall-threshold=45m")
+	require.Contains(t, withValues, "--finalizer-verification-timeout=10s")
+
+	defaults := helmTemplate(t)
+	require.NotContains(t, defaults, "--mirror-stall-threshold")
+	require.NotContains(t, defaults, "--finalizer-verification-timeout")
+}

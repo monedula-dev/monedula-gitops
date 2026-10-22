@@ -19,9 +19,16 @@ import (
 // rather than the safety-net it is meant to be.
 const minResyncInterval = 30 * time.Second
 
+// minMirrorStallThreshold is the floor for --mirror-stall-threshold.
+const minMirrorStallThreshold = time.Minute
+
+// maxFinalizerVerificationTimeout is the ceiling for
+// --finalizer-verification-timeout (the floor is any positive value).
+const maxFinalizerVerificationTimeout = 5 * time.Minute
+
 // newOperatorCmd builds the `operator` command, which runs the controller-runtime
-// manager with the six reconcilers (KafkaCluster / KafkaTopic / KafkaAccessPolicy /
-// KafkaQuota / KafkaRoleBinding / KafkaUser), the Prometheus metrics server, and
+// manager with the seven reconcilers (KafkaCluster / KafkaTopic / KafkaAccessPolicy /
+// KafkaQuota / KafkaRoleBinding / KafkaUser / KafkaMirrorTopic), the Prometheus metrics server, and
 // health probes. It blocks until terminated by a signal.
 func newOperatorCmd() *cobra.Command {
 	var opts manager.Options
@@ -30,7 +37,7 @@ func newOperatorCmd() *cobra.Command {
 		Short: "Run the Monedula GitOps operator (controller-runtime manager)",
 		Long: "Run the Monedula GitOps operator: a controller-runtime manager that " +
 			"reconciles KafkaCluster, KafkaTopic, KafkaAccessPolicy, KafkaQuota, " +
-			"KafkaRoleBinding, and KafkaUser resources, exposing Prometheus metrics " +
+			"KafkaRoleBinding, KafkaUser, and KafkaMirrorTopic resources, exposing Prometheus metrics " +
 			"and health probes.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := validateOperatorOptions(opts); err != nil {
@@ -65,13 +72,19 @@ func newOperatorCmd() *cobra.Command {
 		"namespace to resolve KafkaCluster refs from (empty: each object's own namespace)")
 	cmd.Flags().BoolVar(&opts.EnableWebhooks, "enable-webhooks", false,
 		"enable the validating admission webhooks for KafkaTopic, KafkaQuota, KafkaAccessPolicy, "+
-			"KafkaRoleBinding, and KafkaUser (requires serving certs; spec §20.3)")
+			"KafkaRoleBinding, KafkaUser, and KafkaMirrorTopic (requires serving certs; spec §20.3)")
 	cmd.Flags().StringVar(&opts.WebhookCertDir, "webhook-cert-dir", "",
 		"directory holding the webhook server's serving cert/key (empty: controller-runtime default; only used with --enable-webhooks)")
 	cmd.Flags().DurationVar(&opts.ResyncInterval, "resync-interval", controller.DefaultResyncInterval,
 		fmt.Sprintf("periodic resync cadence for every reconciler (minimum %s); a healthy resource is "+
 			"re-checked on this cadence even without a spec change, so it also bounds duplicate-identity "+
 			"loser recovery latency", minResyncInterval))
+	cmd.Flags().DurationVar(&opts.MirrorStallThreshold, "mirror-stall-threshold", controller.DefaultMirrorStallThreshold,
+		fmt.Sprintf("how long a KafkaMirrorTopic may report an unchanged transitional mirror status before it "+
+			"is reported as stalled (minimum %s); a PENDING_STOPPED mirror is drift immediately", minMirrorStallThreshold))
+	cmd.Flags().DurationVar(&opts.FinalizerVerificationTimeout, "finalizer-verification-timeout", 5*time.Second,
+		fmt.Sprintf("total deadline for the KafkaTopic finalizer's final mirror verification before a "+
+			"deletionPolicy Delete cleanup (must be > 0 and <= %s)", maxFinalizerVerificationTimeout))
 	cmd.Flags().IntVar(&opts.MaxConcurrentReconciles, "max-concurrent-reconciles", controller.DefaultMaxConcurrentReconciles,
 		"reconcile concurrency per kind; >1 requires --leader-elect (in-process serialization "+
 			"protects shared cluster state)")
@@ -86,6 +99,12 @@ func validateOperatorOptions(opts manager.Options) error {
 	if opts.ResyncInterval < minResyncInterval {
 		return &ExitError{Code: 2, Msg: fmt.Sprintf(
 			"--resync-interval must be at least %s, got %s", minResyncInterval, opts.ResyncInterval)}
+	}
+	if opts.MirrorStallThreshold < minMirrorStallThreshold {
+		return &ExitError{Code: 2, Msg: "--mirror-stall-threshold must be at least 1m"}
+	}
+	if opts.FinalizerVerificationTimeout <= 0 || opts.FinalizerVerificationTimeout > maxFinalizerVerificationTimeout {
+		return &ExitError{Code: 2, Msg: "--finalizer-verification-timeout must be > 0 and <= 5m"}
 	}
 	// >1 relies on the operator's IN-PROCESS locking (internal/operator/locking)
 	// to serialize shared-cluster-state writers; a second ACTIVE replica would

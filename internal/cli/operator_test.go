@@ -87,7 +87,11 @@ func TestOperatorCmdConcurrencyWithoutLeaderElectRejected(t *testing.T) {
 // so the passing combinations cannot be exercised through run()): >1 WITH
 // leader election passes validation, as do 1/0 without it.
 func TestValidateOperatorOptionsConcurrencyMatrix(t *testing.T) {
-	base := manager.Options{ResyncInterval: 5 * time.Minute}
+	base := manager.Options{
+		ResyncInterval:               5 * time.Minute,
+		MirrorStallThreshold:         30 * time.Minute,
+		FinalizerVerificationTimeout: 5 * time.Second,
+	}
 
 	withLE := base
 	withLE.MaxConcurrentReconciles = 4
@@ -108,4 +112,36 @@ func TestValidateOperatorOptionsConcurrencyMatrix(t *testing.T) {
 	require.ErrorAs(t, err, &ee)
 	require.Equal(t, 2, ee.Code)
 	require.Contains(t, ee.Msg, "--leader-elect")
+}
+
+// TestValidateOperatorOptionsMirrorFlags pins the bounds of the mirror flags.
+func TestValidateOperatorOptionsMirrorFlags(t *testing.T) {
+	base := manager.Options{
+		ResyncInterval:               5 * time.Minute,
+		MirrorStallThreshold:         30 * time.Minute,
+		FinalizerVerificationTimeout: 5 * time.Second,
+	}
+	require.NoError(t, validateOperatorOptions(base))
+
+	low := base
+	low.MirrorStallThreshold = 30 * time.Second
+	var ee *ExitError
+	require.ErrorAs(t, validateOperatorOptions(low), &ee)
+	require.Equal(t, 2, ee.Code)
+	require.Contains(t, ee.Msg, "--mirror-stall-threshold must be at least 1m")
+
+	min := base
+	min.MirrorStallThreshold = time.Minute
+	require.NoError(t, validateOperatorOptions(min))
+
+	for _, d := range []time.Duration{0, -time.Second, 5*time.Minute + time.Second} {
+		o := base
+		o.FinalizerVerificationTimeout = d
+		var e *ExitError
+		require.ErrorAs(t, validateOperatorOptions(o), &e, d.String())
+		require.Contains(t, e.Msg, "--finalizer-verification-timeout must be > 0 and <= 5m")
+	}
+	max := base
+	max.FinalizerVerificationTimeout = 5 * time.Minute
+	require.NoError(t, validateOperatorOptions(max))
 }

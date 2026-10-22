@@ -92,6 +92,10 @@ type KafkaTopicReconciler struct {
 	// duplicate.go). manager.Run always injects it; nil (unit tests, the
 	// plain-client envtest harness) skips the rechecks.
 	APIReader client.Reader
+	// FinalizerVerificationTimeout is the single total deadline for the
+	// finalizer's final mirror verification under the ACL substrate lock
+	// (--finalizer-verification-timeout). Zero uses the default (5s).
+	FinalizerVerificationTimeout time.Duration
 }
 
 // +kubebuilder:rbac:groups=gitops.monedula.dev,resources=kafkatopics,verbs=get;list;watch;update;patch

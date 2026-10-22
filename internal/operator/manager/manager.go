@@ -83,6 +83,14 @@ type Options struct {
 	// internal/cli/operator.go's --resync-interval flag, which enforces a 30s
 	// floor before this field is ever set.
 	ResyncInterval time.Duration
+	// MirrorStallThreshold is how long a KafkaMirrorTopic may report an
+	// unchanged transitional mirror status before it is reported as stalled
+	// (--mirror-stall-threshold). Zero uses the controller default (30m).
+	MirrorStallThreshold time.Duration
+	// FinalizerVerificationTimeout is the single total deadline for the
+	// KafkaTopic finalizer's final mirror verification
+	// (--finalizer-verification-timeout). Zero uses the controller default.
+	FinalizerVerificationTimeout time.Duration
 	// MaxConcurrentReconciles is the per-kind reconcile concurrency from
 	// --max-concurrent-reconciles, passed through unchanged to every
 	// reconciler's controller.Options (values <1 normalize to 1 in
@@ -128,7 +136,7 @@ func BuildScheme() (*runtime.Scheme, error) {
 	return scheme, nil
 }
 
-// Run builds a controller-runtime manager, registers the six reconcilers with
+// Run builds a controller-runtime manager, registers the seven reconcilers with
 // the production DefaultClientFactory and event recorders, wires health/readiness
 // probes (and the Prometheus metrics server), and blocks until ctx is cancelled.
 //
@@ -293,6 +301,8 @@ func Run(ctx context.Context, opts Options) error {
 		MaxConcurrentReconciles: maxConcurrentReconciles,
 		Locks:                   locks,
 		APIReader:               apiReader,
+
+		FinalizerVerificationTimeout: opts.FinalizerVerificationTimeout,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("setting up KafkaTopic controller: %w", err)
 	}
@@ -352,6 +362,21 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("setting up KafkaUser controller: %w", err)
 	}
 
+	if err := (&controller.KafkaMirrorTopicReconciler{
+		Client:                  mgr.GetClient(),
+		Scheme:                  mgr.GetScheme(),
+		Clients:                 factory,
+		Recorder:                mgr.GetEventRecorder("kafkamirrortopic-controller"),
+		ClusterNamespace:        opts.ClusterNamespace,
+		ResyncInterval:          opts.ResyncInterval,
+		StallThreshold:          opts.MirrorStallThreshold,
+		MaxConcurrentReconciles: maxConcurrentReconciles,
+		Locks:                   locks,
+		APIReader:               apiReader,
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("setting up KafkaMirrorTopic controller: %w", err)
+	}
+
 	// Admission webhooks (spec §20.3, §39.5, §40, v0.35 §T2): identity, shape,
 	// and ACL-conflict validation for KafkaTopic, KafkaQuota,
 	// KafkaAccessPolicy, KafkaRoleBinding, and KafkaUser. Only registered when
@@ -386,6 +411,12 @@ func Run(ctx context.Context, opts Options) error {
 			ClusterNamespace: opts.ClusterNamespace,
 		}).SetupWithManager(mgr); err != nil {
 			return fmt.Errorf("setting up KafkaUser webhook: %w", err)
+		}
+		if err := (&operatorwebhook.KafkaMirrorTopicValidator{
+			Reader:           mgr.GetClient(),
+			ClusterNamespace: opts.ClusterNamespace,
+		}).SetupWithManager(mgr); err != nil {
+			return fmt.Errorf("setting up KafkaMirrorTopic webhook: %w", err)
 		}
 	}
 
