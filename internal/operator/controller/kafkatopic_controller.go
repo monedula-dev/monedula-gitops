@@ -26,6 +26,7 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/api/v1alpha1"
 	"github.com/monedula-dev/monedula-gitops/internal/defaulting"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
+	"github.com/monedula-dev/monedula-gitops/internal/kafkarest"
 	"github.com/monedula-dev/monedula-gitops/internal/mds"
 	"github.com/monedula-dev/monedula-gitops/internal/operator"
 	"github.com/monedula-dev/monedula-gitops/internal/operator/locking"
@@ -156,12 +157,21 @@ func (r *KafkaTopicReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, cerr
 	}
 
+	// Deletion path: the finalizer decision ladder runs here, BEFORE any
+	// Kafka/REST client is built, so the no-cleanup exits (Orphan,
+	// force-removal, a live co-claimant) hold even when the destination
+	// cluster or its REST endpoint is unreachable. See handleDeletion.
+	if !topic.DeletionTimestamp.IsZero() {
+		return r.handleDeletion(ctx, &topic, &cluster, clusterNS)
+	}
+
 	// Duplicate-identity gate (§5.3; the webhook-off backstop, see duplicate.go):
 	// if an OLDER live KafkaTopic claims the same (cluster, topicName) identity,
 	// this CR goes terminal (ValidationFailed/DuplicateIdentity) instead of
-	// flapping last-writer-wins against the winner. Guarded to the non-deletion
-	// path — a deleting loser must still reach its finalizer below — and placed
-	// BEFORE the client build, so a loser never even connects to the broker.
+	// flapping last-writer-wins against the winner. Only the non-deletion path
+	// reaches here (a deleting loser was routed to its finalizer above), and it
+	// runs BEFORE the client build, so a loser never even connects to the
+	// broker.
 	//
 	// The gate → quorum-recheck → engine-mutation span runs under this topic's
 	// per-identity lock (locks.go), taken BEFORE the gate — and before the
@@ -172,23 +182,16 @@ func (r *KafkaTopicReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// return in between. The deletion path takes NO identity lock: its only
 	// contested broker state (the ACL cleanup) is substrate-shared and already
 	// serialized by the ACL substrate lock in deleteTopicState.
-	unlockIdentity := func() {}
-	if topic.DeletionTimestamp.IsZero() {
-		unlockIdentity = lockIdentity(r.Locks, &cluster, topicIdentityKind, operatorwebhook.ResolvedTopicName(&topic))
-		defer unlockIdentity()
-		if res, done, err := r.duplicateIdentityGate(ctx, &topic); done {
-			return res, err
-		}
+	unlockIdentity := lockIdentity(r.Locks, &cluster, topicIdentityKind, operatorwebhook.ResolvedTopicName(&topic))
+	defer unlockIdentity()
+	if res, done, err := r.duplicateIdentityGate(ctx, &topic); done {
+		return res, err
 	}
 
-	// Build the live clients. On the deletion path a build failure is handled
-	// specially (finalizer block / force-removal); on the normal path it is a
-	// transient error.
+	// Build the live clients. A build failure is a transient error here (the
+	// deletion path handles its own build failures in handleDeletion).
 	k, sr, cleanup, berr := r.Clients.For(ctx, &cluster)
 	if berr != nil {
-		if !topic.DeletionTimestamp.IsZero() {
-			return r.handleUnreachableDeletion(ctx, &topic)
-		}
 		logger.Error(berr, "building cluster clients")
 		r.event(&topic, corev1.EventTypeWarning, "ClientsBuildFailed", berr.Error())
 		if uerr := updateStatus(ctx, r.Client, req.NamespacedName, &topic, func() {
@@ -200,12 +203,6 @@ func (r *KafkaTopicReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, berr
 	}
 	defer cleanup()
-
-	// Deletion path: clients built, so cleanup can run per deletionPolicy.
-	if !topic.DeletionTimestamp.IsZero() {
-		resolver := &operator.K8sResolver{Client: r.Client, Namespace: topic.Namespace, Ctx: ctx}
-		return r.handleDeletionWithClient(ctx, &topic, k, sr, resolver, &cluster, clusterNS)
-	}
 
 	// Kafka REST client for the mirror guard; nil when the cluster has no
 	// spec.rest (legacy behavior). A build failure is transient and happens
@@ -434,44 +431,135 @@ func effectiveDeletionPolicy(topic *v1alpha1.KafkaTopic, clusterDefaults *v1alph
 	return "Orphan"
 }
 
-// handleDeletionWithClient runs cluster-side cleanup per the topic's
-// deletionPolicy using the live Kafka client, then removes the finalizer.
-// cluster is the resolved KafkaCluster (its spec.defaults resolve the effective
-// policy when the topic's own spec.deletionPolicy is empty, spec §4.7);
-// clusterNS is the namespace the clusterRef resolved in (needed to scope the
-// cluster ACL view on the Delete path).
+// reasonDeleteBlocked is the finalizer event reason for a Delete-policy
+// deletion that cannot proceed and keeps the finalizer; the message names the
+// specific cause (e.g. claimCheckFailed).
+const reasonDeleteBlocked = "DeleteBlocked"
+
+// claimCheckFailed prefixes the DeleteBlocked message when the deletion
+// co-claimant scan cannot confirm a negative result.
+const claimCheckFailed = "ClaimCheckFailed"
+
+// handleDeletion is the KafkaTopic finalizer decision ladder (mirror-topics
+// design v6, "Decision precedence and co-claimant semantics"). It runs after
+// the cluster CR resolved and BEFORE any Kafka/REST client is built, in this
+// order:
 //
-//	Orphan (default): leave the Kafka topic + ACLs in place.
-//	Delete: delete the topic's managed ACLs, the topic itself, and the topic's
-//	        managed Schema Registry subjects (spec §12), but ONLY when approved
-//	        via the gitops.monedula.dev/allow-delete=true annotation.
-//	        Without approval the finalizer is retained (a Warning is emitted) so
-//	        the deletion is gated behind an explicit operator acknowledgement.
+//  1. Effective policy Orphan, or the force-removal annotation: remove the
+//     finalizer with no external cleanup and no client.
+//  2. Policy Delete: scan for a live co-claimant of the same canonical
+//     (cluster, topic name) key — another KafkaTopic or a KafkaMirrorTopic,
+//     age-blind. A positive result is a FULL orphan: Warning
+//     OrphanedToCoClaimant naming the claimant, finalizer removed, no topic,
+//     ACL or schema cleanup. A failed scan (cached or quorum recheck) keeps
+//     the finalizer (DeleteBlocked/ClaimCheckFailed) and returns the error:
+//     a failed scan is never a negative result.
+//  3. No claimant but no allow-delete approval: DeleteNotApproved, finalizer
+//     retained, requeue at the resync cadence.
+//  4. Only now build the Kafka/SR and REST clients (a build failure takes
+//     handleUnreachableDeletion) and run the cleanup in
+//     handleDeletionWithClient.
+//
+// Like the rest of the deletion path it takes no identity lock.
+func (r *KafkaTopicReconciler) handleDeletion(ctx context.Context, topic *v1alpha1.KafkaTopic, cluster *v1alpha1.KafkaCluster, clusterNS string) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(topic, FinalizerName) {
+		return ctrl.Result{}, nil // already finalized; nothing to do
+	}
+
+	// 1. No-cleanup exits.
+	if effectiveDeletionPolicy(topic, cluster.Spec.Defaults) != deletionPolicyDelete {
+		return r.removeFinalizer(ctx, topic) // Orphan: leave the Kafka topic + ACLs in place
+	}
+	if topic.Annotations[AnnotationForceFinalizerRemoval] == "true" {
+		r.finalizeEvent(topic, corev1.EventTypeWarning, "ForceFinalizerRemoval",
+			"removing finalizer without cluster-side cleanup (force-removal annotation set)")
+		return r.removeFinalizer(ctx, topic)
+	}
+
+	// 2. Co-claimant scan.
+	co, err := r.findDeletionCoClaimant(ctx, topic)
+	if err != nil {
+		r.finalizeEvent(topic, corev1.EventTypeWarning, reasonDeleteBlocked, claimCheckFailed+": "+err.Error())
+		return ctrl.Result{}, err // requeue with backoff, finalizer retained
+	}
+	if co != nil {
+		topicName := operatorwebhook.ResolvedTopicName(topic)
+		claimant := topicClaimKind(co) + "/" + co.GetNamespace() + "/" + co.GetName()
+		msg := fmt.Sprintf("Kafka topic %q, its ACLs and schema subjects left in place: live %s still claims the topic",
+			topicName, claimant)
+		log.FromContext(ctx).Info("skipping topic deletion cleanup: topic has a live co-claimant",
+			"topic", topicName, "claimant", claimant)
+		r.finalizeEvent(topic, corev1.EventTypeWarning, reasonOrphanedToCoClaimant, msg)
+		return r.removeFinalizer(ctx, topic)
+	}
+
+	// 3. Destructive deletion is gated: retain the finalizer until approved.
+	if topic.Annotations[reconcile.AnnotationAllowDelete] != "true" {
+		msg := "deletionPolicy=Delete requires approval; set annotation " +
+			reconcile.AnnotationAllowDelete + "=true to delete the Kafka topic + ACLs"
+		r.finalizeEvent(topic, corev1.EventTypeWarning, "DeleteNotApproved", msg)
+		return ctrl.Result{RequeueAfter: resyncInterval(r.ResyncInterval)}, nil
+	}
+
+	// 4. Cleanup needs live clients.
+	k, sr, cleanup, berr := r.Clients.For(ctx, cluster)
+	if berr != nil {
+		log.FromContext(ctx).Error(berr, "building cluster clients for deletion cleanup")
+		return r.handleUnreachableDeletion(ctx, topic)
+	}
+	defer cleanup()
+	// Kafka REST client for the mirror-state preflight; nil when the cluster
+	// has no spec.rest (legacy deletion behavior).
+	rest, rberr := r.Clients.RESTFor(ctx, cluster)
+	if rberr != nil {
+		log.FromContext(ctx).Error(rberr, "building cluster REST client for deletion cleanup")
+		return r.handleUnreachableDeletion(ctx, topic)
+	}
+	resolver := &operator.K8sResolver{Client: r.Client, Namespace: topic.Namespace, Ctx: ctx}
+	return r.handleDeletionWithClient(ctx, topic, k, sr, rest, resolver, cluster, clusterNS)
+}
+
+// findDeletionCoClaimant runs the deletion co-claimant scan for topic: the
+// cached scan first, then — only when it found NO live co-claimant, the branch
+// about to destroy external state — a recheck through the uncached APIReader
+// (the KafkaUser/KafkaQuota deletion pattern, duplicate.go). A co-claimant the
+// cache missed flips the outcome to full orphan; a positive cached result
+// needs no recheck because orphaning is already fail-safe. Any List error is
+// returned: a failed scan never counts as a negative result.
+func (r *KafkaTopicReconciler) findDeletionCoClaimant(ctx context.Context, topic *v1alpha1.KafkaTopic) (client.Object, error) {
+	namespaceLocal := r.ClusterNamespace == ""
+	co, err := findLiveTopicCoClaimant(ctx, r.Client, topic, namespaceLocal)
+	if err == nil && co == nil && r.APIReader != nil {
+		co, err = findLiveTopicCoClaimant(ctx, r.APIReader, topic, namespaceLocal)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return co, nil
+}
+
+// handleDeletionWithClient runs the Delete-policy cleanup with live clients
+// and then removes the finalizer. It is reached only from handleDeletion,
+// after the no-cleanup exits, a confirmed-negative co-claimant scan and the
+// allow-delete approval gate, so every call here is an approved destructive
+// deletion: the topic's managed ACLs, the topic itself, and its managed
+// Schema Registry subjects (spec §12). A cleanup failure keeps the finalizer
+// and requeues.
+//
+// rest is the destination Kafka REST client, nil when the cluster has no
+// spec.rest. It is the seam for the mirror-state preflight and final
+// verification, which are not wired in yet: no REST call is made here.
 //
 // sr may be nil (no Schema Registry configured for the cluster); in that case
-// subject deletion is skipped without error. r is the secrets.Resolver used to
-// read schema bodies for subject-name computation.
-func (r *KafkaTopicReconciler) handleDeletionWithClient(ctx context.Context, topic *v1alpha1.KafkaTopic, k kafka.AdminClient, sr schemaregistry.Client, resolver secrets.Resolver, cluster *v1alpha1.KafkaCluster, clusterNS string) (ctrl.Result, error) {
-	if !controllerutil.ContainsFinalizer(topic, FinalizerName) {
-		return ctrl.Result{}, nil
+// subject deletion is skipped without error. resolver reads schema bodies for
+// subject-name computation; cluster/clusterNS scope the co-ownership ACL view.
+func (r *KafkaTopicReconciler) handleDeletionWithClient(ctx context.Context, topic *v1alpha1.KafkaTopic, k kafka.AdminClient, sr schemaregistry.Client, rest kafkarest.Client, resolver secrets.Resolver, cluster *v1alpha1.KafkaCluster, clusterNS string) (ctrl.Result, error) {
+	_ = rest // mirror-state preflight seam (see doc comment)
+	if err := r.deleteTopicState(ctx, topic, k, sr, resolver, cluster, clusterNS); err != nil {
+		r.finalizeEvent(topic, corev1.EventTypeWarning, "DeleteFailed", err.Error())
+		return ctrl.Result{}, err // transient: requeue, finalizer retained
 	}
-
-	policy := effectiveDeletionPolicy(topic, cluster.Spec.Defaults)
-	if policy == deletionPolicyDelete {
-		if topic.Annotations[reconcile.AnnotationAllowDelete] != "true" {
-			// Destructive deletion is gated: retain the finalizer until approved.
-			msg := "deletionPolicy=Delete requires approval; set annotation " +
-				reconcile.AnnotationAllowDelete + "=true to delete the Kafka topic + ACLs"
-			r.finalizeEvent(topic, corev1.EventTypeWarning, "DeleteNotApproved", msg)
-			return ctrl.Result{RequeueAfter: resyncInterval(r.ResyncInterval)}, nil
-		}
-		if err := r.deleteTopicState(ctx, topic, k, sr, resolver, cluster, clusterNS); err != nil {
-			r.finalizeEvent(topic, corev1.EventTypeWarning, "DeleteFailed", err.Error())
-			return ctrl.Result{}, err // transient: requeue, finalizer retained
-		}
-		r.finalizeEvent(topic, corev1.EventTypeNormal, "Deleted", "topic, managed ACLs, and managed schema subjects deleted")
-	}
-
+	r.finalizeEvent(topic, corev1.EventTypeNormal, "Deleted", "topic, managed ACLs, and managed schema subjects deleted")
 	return r.removeFinalizer(ctx, topic)
 }
 

@@ -556,7 +556,10 @@ func (r *KafkaRoleBindingReconciler) duplicateIdentityGate(ctx context.Context, 
 // KafkaUser or KafkaQuota skips its broker-side cleanup because another live
 // (non-deleting) same-kind CR still claims the same broker identity: the
 // finalizer is removed, but the credential/quota is orphaned to the surviving
-// claimant, which keeps managing it.
+// claimant, which keeps managing it. A deleting Delete-policy KafkaTopic uses
+// it too (as a Warning) when another live KafkaTopic or KafkaMirrorTopic
+// claims the same topic: the topic, its ACLs and schema subjects are left in
+// place (see KafkaTopicReconciler.handleDeletion).
 const reasonOrphanedToCoClaimant = "OrphanedToCoClaimant"
 
 // findLiveUserCoClaimant returns another live (non-deleting) KafkaUser
