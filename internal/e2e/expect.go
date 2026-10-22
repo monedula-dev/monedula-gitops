@@ -77,6 +77,7 @@ type LiveState struct {
 	Quotas   []QuotaExpect   `json:"quotas,omitempty"`
 	Subjects []SubjectExpect `json:"subjects,omitempty"`
 	Users    []UserExpect    `json:"users,omitempty"`
+	Mirrors  []MirrorExpect  `json:"mirrors,omitempty"`
 	Absent   *AbsentState    `json:"absent,omitempty"`
 }
 
@@ -88,6 +89,8 @@ type LiveState struct {
 type AbsentState struct {
 	Topics []string          `json:"topics,omitempty"`
 	Users  []UserAbsentEntry `json:"users,omitempty"`
+	// Mirrors lists mirror topic names that must not exist.
+	Mirrors []string `json:"mirrors,omitempty"`
 }
 
 // UserExpect asserts a SCRAM credential exists for (Username, Mechanism).

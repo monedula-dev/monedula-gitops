@@ -628,7 +628,9 @@ func runCLIScenario(t *testing.T, scenarioDir string, stack composeStack) {
 func checkLiveState(t *testing.T, scenarioDir, clusterConfigFile string, exp *e2e.Expect) {
 	t.Helper()
 	hasLiveState := len(exp.LiveState.Topics) > 0 || len(exp.LiveState.ACLs) > 0 ||
-		len(exp.LiveState.Quotas) > 0 || len(exp.LiveState.Subjects) > 0 || len(exp.LiveState.Users) > 0
+		len(exp.LiveState.Quotas) > 0 || len(exp.LiveState.Subjects) > 0 || len(exp.LiveState.Users) > 0 ||
+		len(exp.LiveState.Mirrors) > 0 ||
+		(exp.LiveState.Absent != nil && len(exp.LiveState.Absent.Mirrors) > 0)
 	if !hasLiveState {
 		return
 	}

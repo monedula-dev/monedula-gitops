@@ -16,6 +16,7 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/e2e"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka/mock"
+	"github.com/monedula-dev/monedula-gitops/internal/kafkarest"
 	"github.com/monedula-dev/monedula-gitops/internal/loader"
 	"github.com/monedula-dev/monedula-gitops/internal/operator/manager"
 	"github.com/monedula-dev/monedula-gitops/internal/schemaregistry"
@@ -280,6 +281,22 @@ func buildSchemaClientForE2E(clusterConfigPath string) (schemaregistry.Client, e
 	}
 	dir := filepath.Dir(clusterConfigPath)
 	return cluster.BuildSchemaClient(kc, secrets.FileEnvResolver{BaseDir: dir})
+}
+
+// buildRESTClientForE2E loads a KafkaCluster manifest and builds the Kafka REST
+// client for mirror liveState probing. Returns (nil, nil) when the cluster has
+// no spec.rest.
+func buildRESTClientForE2E(clusterConfigPath string) (kafkarest.Client, error) {
+	objs, err := loader.Load(loader.Options{Filenames: []string{clusterConfigPath}})
+	if err != nil {
+		return nil, err
+	}
+	kc, err := findCluster(objs)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", clusterConfigPath, err)
+	}
+	dir := filepath.Dir(clusterConfigPath)
+	return cluster.BuildKafkaRESTClient(kc, secrets.FileEnvResolver{BaseDir: dir})
 }
 
 // buildE2EK8sClient constructs a controller-runtime client using the project
