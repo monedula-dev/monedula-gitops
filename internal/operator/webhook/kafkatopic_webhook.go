@@ -15,9 +15,9 @@
 //   - Tenancy (§20.2): the topic's namespace and name must satisfy the
 //     referenced cluster's tenancy policy. The reconciler enforces this
 //     terminally; the webhook rejects at admission for fast feedback. Tenancy
-//     is never checked on an update where the object is being deleted
-//     (DeletionTimestamp set), so tightening tenancy after a topic exists can
-//     never make it undeletable.
+//     and identity uniqueness are never checked on an update where the object
+//     is being deleted (DeletionTimestamp set), so tightening tenancy or a
+//     competing claim can never make a topic undeletable.
 //
 // The validator reads only from the manager's cache (a client.Reader), so it
 // never blocks admission on a live apiserver round-trip beyond the cache.
@@ -109,9 +109,10 @@ func (v *KafkaTopicValidator) ValidateCreate(ctx context.Context, topic *v1alpha
 // is rejected with the clearest message before the (now-stale-identity)
 // uniqueness scan.
 //
-// # Deletion wedge (tenancy)
+// # Deletion wedge
 //
-// The tenancy check is SKIPPED when newTopic has a non-zero DeletionTimestamp.
+// The identity-uniqueness and tenancy checks are SKIPPED when newTopic has a
+// non-zero DeletionTimestamp.
 // Tenancy policy can be tightened after a topic already exists (a namespace
 // removed from allowedNamespaces, a prefix rule added), and once that happens
 // a still-live topic would fail its own tenancy check forever — including on
@@ -121,11 +122,15 @@ func (v *KafkaTopicValidator) ValidateCreate(ctx context.Context, topic *v1alpha
 // Deletion must always be able to proceed once requested, so tenancy is not
 // re-evaluated once DeletionTimestamp is set.
 //
-// Immutability and identity-uniqueness stay ACTIVE during deletion: they are
-// cheap (no cluster-side dependency that can drift out from under an existing
-// object) and cannot wedge a deletion — finalizer removal and the delete
-// annotation patch don't touch spec.topicName or spec.clusterRef, and identity
-// uniqueness only rejects a genuine duplicate, not a policy change.
+// Identity uniqueness wedges a deletion the same way: a KafkaMirrorTopic (or a
+// duplicate KafkaTopic that slipped through a cache-lag window) may claim the
+// same topic while this CR is being deleted, and rejecting the finalizer
+// removal would keep both claims alive forever. A deleting CR is giving up its
+// claim, so it can never create a new collision.
+//
+// Immutability stays ACTIVE during deletion: it is cheap and cannot wedge a
+// deletion — finalizer removal and the delete annotation patch don't touch
+// spec.topicName or spec.clusterRef.
 func (v *KafkaTopicValidator) ValidateUpdate(ctx context.Context, oldTopic, newTopic *v1alpha1.KafkaTopic) (admission.Warnings, error) {
 	// Immutability: compare RESOLVED names so adding an explicit topicName equal
 	// to metadata.name (empty -> explicit-same) is NOT treated as a change.
@@ -147,14 +152,15 @@ func (v *KafkaTopicValidator) ValidateUpdate(ctx context.Context, oldTopic, newT
 			newTopic.Namespace, newTopic.Name, oldTopic.Spec.ClusterRef.Name, newTopic.Spec.ClusterRef.Name)
 	}
 
-	if err := v.checkIdentityUnique(ctx, newTopic); err != nil {
-		return nil, err
+	if !newTopic.DeletionTimestamp.IsZero() {
+		// Deletion in progress: never let identity uniqueness or a tenancy
+		// change wedge it. See the "Deletion wedge" note on this method's doc
+		// comment.
+		return nil, nil
 	}
 
-	if !newTopic.DeletionTimestamp.IsZero() {
-		// Deletion in progress: never let a tenancy change wedge it. See the
-		// "Deletion wedge (tenancy)" note on this method's doc comment.
-		return nil, nil
+	if err := v.checkIdentityUnique(ctx, newTopic); err != nil {
+		return nil, err
 	}
 	return nil, v.checkTenancy(ctx, newTopic)
 }

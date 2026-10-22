@@ -224,3 +224,102 @@ func TestTopicValidateCreate_MirrorOtherNamespaceNoOverride_Allowed(t *testing.T
 		t.Fatalf("different resolved cluster must not collide: %v", err)
 	}
 }
+
+func TestTopicValidateCreate_MirrorOtherNamespaceWithOverride_Denied(t *testing.T) {
+	// With ClusterNamespace set, every namespace resolves to the same
+	// KafkaCluster, so a mirror in another namespace claims the same topic.
+	m := mirrorCR("uid-m", "team-b", "m1", "prod", "src.orders", "orders")
+	v := &KafkaTopicValidator{Reader: newMirrorFakeClient(t, m), ClusterNamespace: "kafka"}
+	_, err := v.ValidateCreate(context.Background(), topic("uid-t", "team-a", "t1", "prod", "orders"))
+	if err == nil || !strings.Contains(err.Error(), "KafkaMirrorTopic team-b/m1") {
+		t.Fatalf("expected a cluster-wide cross-namespace mirror collision, got %v", err)
+	}
+}
+
+// ---- Deletion wedge: updates to a deleting CR are never rejected ----
+
+func TestTopicValidateUpdate_DeletingWithLiveMirrorClaim_Allowed(t *testing.T) {
+	// A KafkaTopic being deleted while a live KafkaMirrorTopic claims the same
+	// topic: the finalizer-removal / annotation update must not be rejected by
+	// identity uniqueness, or the topic could never finish deleting.
+	m := mirrorCR("uid-m", "team-a", "m1", "prod", "src.orders", "orders")
+	old := topic("uid-t", "team-a", "t1", "prod", "orders")
+	v := &KafkaTopicValidator{Reader: newMirrorFakeClient(t, m, old)}
+
+	updated := old.DeepCopy()
+	now := metav1.Now()
+	updated.DeletionTimestamp = &now
+	updated.Finalizers = nil
+	if _, err := v.ValidateUpdate(context.Background(), old, updated); err != nil {
+		t.Fatalf("update of a deleting KafkaTopic must be allowed: %v", err)
+	}
+}
+
+func TestTopicValidateUpdate_NotDeletingWithLiveMirrorClaim_Denied(t *testing.T) {
+	m := mirrorCR("uid-m", "team-a", "m1", "prod", "src.orders", "orders")
+	old := topic("uid-t", "team-a", "t1", "prod", "orders")
+	v := &KafkaTopicValidator{Reader: newMirrorFakeClient(t, m, old)}
+
+	updated := old.DeepCopy()
+	updated.Annotations = map[string]string{"x": "y"}
+	if _, err := v.ValidateUpdate(context.Background(), old, updated); err == nil || !strings.Contains(err.Error(), "KafkaMirrorTopic") {
+		t.Fatalf("non-deleting collision must still be rejected, got %v", err)
+	}
+}
+
+func TestTopicValidateUpdate_DeletingWithLiveTopicDuplicate_Allowed(t *testing.T) {
+	other := topic("uid-o", "team-a", "t0", "prod", "orders")
+	old := topic("uid-t", "team-a", "t1", "prod", "orders")
+	v := &KafkaTopicValidator{Reader: newMirrorFakeClient(t, other, old)}
+
+	updated := old.DeepCopy()
+	now := metav1.Now()
+	updated.DeletionTimestamp = &now
+	if _, err := v.ValidateUpdate(context.Background(), old, updated); err != nil {
+		t.Fatalf("update of a deleting KafkaTopic must be allowed: %v", err)
+	}
+}
+
+func TestMirrorValidateUpdate_DeletingWithLiveTopicClaim_Allowed(t *testing.T) {
+	tp := topic("uid-t", "team-a", "t1", "prod", "orders")
+	old := mirrorCR("uid-m", "team-a", "m1", "prod", "orders", "")
+	v := &KafkaMirrorTopicValidator{Reader: newMirrorFakeClient(t, tp, old)}
+
+	updated := old.DeepCopy()
+	now := metav1.Now()
+	updated.DeletionTimestamp = &now
+	if _, err := v.ValidateUpdate(context.Background(), old, updated); err != nil {
+		t.Fatalf("update of a deleting KafkaMirrorTopic must be allowed: %v", err)
+	}
+}
+
+func TestMirrorValidateUpdate_NotDeletingWithLiveTopicClaim_Denied(t *testing.T) {
+	tp := topic("uid-t", "team-a", "t1", "prod", "orders")
+	old := mirrorCR("uid-m", "team-a", "m1", "prod", "orders", "")
+	v := &KafkaMirrorTopicValidator{Reader: newMirrorFakeClient(t, tp, old)}
+
+	updated := old.DeepCopy()
+	updated.Annotations = map[string]string{"x": "y"}
+	if _, err := v.ValidateUpdate(context.Background(), old, updated); err == nil || !strings.Contains(err.Error(), "KafkaTopic team-a/t1") {
+		t.Fatalf("non-deleting collision must still be rejected, got %v", err)
+	}
+}
+
+func TestMirrorValidateUpdate_DeletingInvalidShape_Allowed(t *testing.T) {
+	// A mirror whose stored shape no longer passes validation (e.g. the shape
+	// rules tightened after it was created) must still be deletable.
+	old := mirrorCR("uid-m", "team-a", "m1", "prod", "src", "")
+	old.Spec.LinkName = ""
+	v := &KafkaMirrorTopicValidator{Reader: newMirrorFakeClient(t)}
+
+	updated := old.DeepCopy()
+	now := metav1.Now()
+	updated.DeletionTimestamp = &now
+	if _, err := v.ValidateUpdate(context.Background(), old, updated); err != nil {
+		t.Fatalf("update of a deleting KafkaMirrorTopic must skip shape validation: %v", err)
+	}
+	// Without a deletion timestamp the shape check still applies.
+	if _, err := v.ValidateUpdate(context.Background(), old, old.DeepCopy()); err == nil {
+		t.Fatal("non-deleting update with an invalid shape must be rejected")
+	}
+}

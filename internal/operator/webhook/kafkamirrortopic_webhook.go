@@ -71,20 +71,24 @@ func (v *KafkaMirrorTopicValidator) ValidateCreate(ctx context.Context, m *v1alp
 }
 
 // ValidateUpdate enforces shape, identity immutability, cross-kind identity
-// uniqueness and tenancy. Tenancy is skipped once the object is being deleted
-// so a tightened policy can never wedge a deletion.
+// uniqueness and tenancy. Once the object is being deleted only immutability
+// is checked: shape rules, a competing claim or a tightened tenancy policy can
+// never reject a finalizer or annotation update on a deleting CR.
 func (v *KafkaMirrorTopicValidator) ValidateUpdate(ctx context.Context, oldM, newM *v1alpha1.KafkaMirrorTopic) (admission.Warnings, error) {
-	if err := checkMirrorShape(newM); err != nil {
-		return nil, err
+	deleting := !newM.DeletionTimestamp.IsZero()
+	if !deleting {
+		if err := checkMirrorShape(newM); err != nil {
+			return nil, err
+		}
 	}
 	if err := checkMirrorImmutable(oldM, newM); err != nil {
 		return nil, err
 	}
+	if deleting {
+		return nil, nil
+	}
 	if err := v.checkIdentityUnique(ctx, newM); err != nil {
 		return nil, err
-	}
-	if !newM.DeletionTimestamp.IsZero() {
-		return nil, nil
 	}
 	return nil, v.checkTenancy(ctx, newM)
 }
