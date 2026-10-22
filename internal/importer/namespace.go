@@ -146,7 +146,8 @@ func (r resolver) for_(topicName string) string {
 }
 
 // AssignNamespaces sets ObjectMeta.Namespace on every object in res: topics via
-// the strategy, policies following their governed topic(s), schema files
+// the strategy, mirror topics via the strategy on their effective topic name,
+// policies following their governed topic(s), schema files
 // following their owning topic (via MetaName), and quotas + role bindings + users
 // (which are not topic-scoped) receiving the fallback namespace.
 //
@@ -174,6 +175,16 @@ func AssignNamespaces(res *Result, s NamespaceStrategy) error {
 		key := tp.ResolvedTopicName()
 		ns := r.for_(key)
 		tp.Namespace = ns
+		if key != "" {
+			nsByTopic[key] = ns
+		}
+	}
+	// Mirror topics follow the same strategy, keyed by effective topic name,
+	// so a policy on a mirror topic lands next to it.
+	for _, m := range res.Mirrors {
+		key := m.Spec.EffectiveTopicName()
+		ns := r.for_(key)
+		m.Namespace = ns
 		if key != "" {
 			nsByTopic[key] = ns
 		}

@@ -1,0 +1,13 @@
+# Destination cluster for import: payments.orders is an ACTIVE mirror and
+# payments.pending is being promoted (PENDING_STOPPED), so the import is partial.
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: dr
+  annotations:
+    gitops.monedula.dev/mock-state-file: mirror-import-state.yaml
+    gitops.monedula.dev/mock-rest-file: mirror-import-rest.yaml
+spec:
+  bootstrapServers: localhost:9092
+  rest:
+    endpoint: https://broker-0.dr:8090/kafka
