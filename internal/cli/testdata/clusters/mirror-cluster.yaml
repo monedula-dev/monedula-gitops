@@ -1,0 +1,12 @@
+# Destination cluster with an ACTIVE link and no mirrors yet (mirror creation).
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: dr
+  annotations:
+    gitops.monedula.dev/mock-state-file: mirror-state.yaml
+    gitops.monedula.dev/mock-rest-file: mirror-rest.yaml
+spec:
+  bootstrapServers: localhost:9092
+  rest:
+    endpoint: https://broker-0.dr:8090/kafka

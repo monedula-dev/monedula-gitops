@@ -1,0 +1,15 @@
+# REST mock that fails every kafkarest.Client method.
+clusterId: dr-cluster-id
+failures:
+  - method: ClusterID
+    error: "REST must not be contacted"
+  - method: ListLinks
+    error: "REST must not be contacted"
+  - method: LinkConfigs
+    error: "REST must not be contacted"
+  - method: ListMirrors
+    error: "REST must not be contacted"
+  - method: CreateMirror
+    error: "REST must not be contacted"
+  - method: AlterTopicConfigs
+    error: "REST must not be contacted"

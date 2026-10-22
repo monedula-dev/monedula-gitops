@@ -10,6 +10,7 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/executor"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
 	"github.com/monedula-dev/monedula-gitops/internal/mds"
+	"github.com/monedula-dev/monedula-gitops/internal/mirror"
 	"github.com/monedula-dev/monedula-gitops/internal/operations"
 	"github.com/monedula-dev/monedula-gitops/internal/output"
 	"github.com/monedula-dev/monedula-gitops/internal/pipeline"
@@ -276,12 +277,50 @@ func computeOps(ctx context.Context, f *sharedFlags, requireClusters bool, rotat
 		}
 	}
 
+	// Mirror state (Kafka REST v3): read only when the manifests declare topics
+	// (the KafkaTopic mirror guard) or mirror topics, and only when the
+	// selected cluster has a REST client. Otherwise the REST client is not even
+	// built, so a run declaring neither kind never touches REST. A snapshot
+	// read failure does NOT abort the run: the incomplete snapshot flows into
+	// the diff, which reports StateReadError ops for the affected resources. A
+	// client build error is a configuration error (exit 2).
+	var liveMirrors *mirror.Snapshot
+	if len(plan.DesiredTopics)+len(plan.DesiredMirrors) > 0 {
+		rest, rerr := buildRESTClient(plan, f.clusterConfigFiles)
+		if rerr != nil {
+			return plan, clients, cleanup, nil, &ExitError{Code: 2, Msg: rerr.Error()}
+		}
+		if rest != nil {
+			snap := mirror.ReadSnapshot(ctx, client, rest, linkNames(plan.DesiredMirrors))
+			if snap.Err != nil {
+				logger.Warn("could not read mirror state; affected resources report StateReadError", "error", snap.Err)
+			}
+			liveMirrors = &snap
+			clients.Mirrors = mirror.Writer{Kafka: client, REST: rest}
+		}
+	}
+
 	ops = diff.Compute(
-		diff.Desired{Topics: plan.DesiredTopics, ACLs: plan.DesiredACLs, Schemas: plan.DesiredSchemas, Quotas: plan.DesiredQuotas, Users: plan.DesiredUsers, RotatePasswords: rotatePasswords, Scope: plan.Scope, RoleBindings: plan.DesiredRoleBindings, RoleBindingScope: plan.RoleBindingScope},
-		diff.Live{Topics: liveTopics, ACLs: liveACLs(liveACLStates), Schemas: liveSchemas, Quotas: liveQuotas, ScramCredentials: liveScram, SupersededSchemas: superseded, RoleBindings: liveRoleBindings, GlobalCompatibility: globalCompat},
+		diff.Desired{Topics: plan.DesiredTopics, Mirrors: plan.DesiredMirrors, ACLs: plan.DesiredACLs, Schemas: plan.DesiredSchemas, Quotas: plan.DesiredQuotas, Users: plan.DesiredUsers, RotatePasswords: rotatePasswords, Scope: plan.Scope, RoleBindings: plan.DesiredRoleBindings, RoleBindingScope: plan.RoleBindingScope},
+		diff.Live{Topics: liveTopics, ACLs: liveACLs(liveACLStates), Schemas: liveSchemas, Quotas: liveQuotas, ScramCredentials: liveScram, SupersededSchemas: superseded, RoleBindings: liveRoleBindings, GlobalCompatibility: globalCompat, Mirrors: liveMirrors},
 	)
 	logger.Info("computed operations", "cluster", plan.SelectedCluster, "count", len(ops))
 	return plan, clients, cleanup, ops, nil
+}
+
+// linkNames returns the distinct cluster-link names the desired mirrors use, in
+// first-seen order, so the snapshot reads each link's configs once.
+func linkNames(mirrors []diff.DesiredMirror) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, m := range mirrors {
+		if seen[m.LinkName] {
+			continue
+		}
+		seen[m.LinkName] = true
+		out = append(out, m.LinkName)
+	}
+	return out
 }
 
 // liveReadCount renders one kind's live-read result for the debug log: the

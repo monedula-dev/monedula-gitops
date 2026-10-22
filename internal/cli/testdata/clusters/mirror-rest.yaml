@@ -1,0 +1,9 @@
+# REST mock: ACTIVE link prod-to-dr, no mirrors.
+clusterId: dr-cluster-id
+links:
+  - name: prod-to-dr
+    state: ACTIVE
+    configs:
+      topic.config.sync.include: "cleanup.policy"
+      cluster.link.prefix: ""
+mirrors: []
