@@ -20,6 +20,7 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/api/v1alpha1"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka/franz"
+	restconfluent "github.com/monedula-dev/monedula-gitops/internal/kafkarest/confluent"
 	"github.com/monedula-dev/monedula-gitops/internal/secrets"
 )
 
@@ -349,18 +350,51 @@ func cleanupTopic(t *testing.T, admin *franz.Client, runPrefix, topic string) {
 	})
 }
 
+// isMirrorOnLink reports whether Kafka REST lists dest as a mirror topic on
+// the given link. Cleanup uses it so a pre-existing normal topic is never
+// deleted.
+func isMirrorOnLink(env cloudEnv, dest string) (bool, error) {
+	user, pass := os.Getenv(envRESTKey), os.Getenv(envRESTSecret)
+	rc, err := restconfluent.New(env.restEndpoint, env.clusterID, restconfluent.BasicAuth(user, pass), nil)
+	if err != nil {
+		return false, err
+	}
+	ctx, cancel := adminCtx()
+	defer cancel()
+	mirrors, err := rc.ListMirrors(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, m := range mirrors {
+		if m.MirrorTopicName == dest && m.LinkName == env.linkName {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // deleteMirrorDestination deletes the mirror destination topic through the
-// Kafka Admin API and returns a note recording the outcome. A failure is
-// returned (and surfaced in the summary table), never swallowed.
-func deleteMirrorDestination(t *testing.T, admin *franz.Client, dest string) string {
+// Kafka Admin API, but only when REST shows it as a mirror on the configured
+// link, and returns a note recording the outcome. failed is true when the
+// topic may be left behind; the caller must fail the test then.
+func deleteMirrorDestination(t *testing.T, env cloudEnv, admin *franz.Client, dest string) (note string, failed bool) {
+	isMirror, err := isMirrorOnLink(env, dest)
+	if err != nil {
+		t.Logf("cleanup: listing mirrors: %v", err)
+		return fmt.Sprintf("CLEANUP FAILED: could not confirm %s is a mirror (%v) - check and remove it manually", dest, err), true
+	}
+	if !isMirror {
+		t.Logf("cleanup: %s is not a mirror on link %s; nothing deleted", dest, env.linkName)
+		return "cleanup skipped: apply did not create a mirror", false
+	}
 	ctx, cancel := adminCtx()
 	defer cancel()
 	if err := admin.DeleteTopic(ctx, dest); err != nil {
 		t.Logf("cleanup: deleting mirror destination topic %s: %v", dest, err)
-		return fmt.Sprintf("CLEANUP FAILED: mirror topic %s not deleted (%v) - remove it manually", dest, err)
+		return fmt.Sprintf("CLEANUP FAILED: mirror topic %s not deleted (%v) - remove it manually", dest, err), true
 	}
 	t.Logf("cleanup: deleted mirror destination topic %s", dest)
-	return fmt.Sprintf("mirror topic %s created, verified and deleted", dest)
+	return fmt.Sprintf("mirror topic %s created, verified and deleted", dest), false
 }
 
 // cleanupACLs registers deletion of every ACL whose resource name carries the

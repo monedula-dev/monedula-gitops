@@ -773,7 +773,14 @@ func runSteps(t *testing.T, scenarioDir, clusterConfigFile string, stack compose
 			t.Logf("=== step %d: exec %s: %s (exit %d) ===\n%s", i, st.Exec.Service,
 				strings.Join(st.Exec.Command, " "), code, out)
 			if st.Expect != nil {
-				if r := e2e.CheckExitCode(code, st.Expect.ExitCode); !r.Pass {
+				// An exec step never passes on a non-zero exit unless the
+				// scenario says so: default the expected exit code to 0.
+				wantCode := st.Expect.ExitCode
+				if wantCode == nil {
+					zero := 0
+					wantCode = &zero
+				}
+				if r := e2e.CheckExitCode(code, wantCode); !r.Pass {
 					t.Errorf("step %d exit: %s\n%s", i, r.Name, r.Detail)
 				}
 				if r := e2e.CheckOutput(out, st.Expect.OutputContains, st.Expect.OutputMatches); !r.Pass {

@@ -617,7 +617,7 @@ func TestCloud(t *testing.T) {
 		if dcode != 0 {
 			st.Fatalf("verdict: doctor with REST configured FAILED (exit %d)", dcode)
 		}
-		if !strings.Contains(dout, env.linkName) {
+		if !strings.Contains(dout, "link:"+env.linkName) {
 			st.Fatalf("verdict: doctor output does not list cluster link %q", env.linkName)
 		}
 
@@ -628,7 +628,11 @@ func TestCloud(t *testing.T) {
 		// when the summary is rendered; it is registered before apply because
 		// the mirror may exist even when apply reports a failure.
 		defer func() {
-			notes["mirror"] = deleteMirrorDestination(st, admin, dest)
+			note, failed := deleteMirrorDestination(st, env, admin, dest)
+			notes["mirror"] = note
+			if failed {
+				st.Errorf("%s", note)
+			}
 		}()
 		out, code := runCLI(st, "apply", "-f", mirrorDir, "-c", cfgPath)
 		noPanic(st, out)
