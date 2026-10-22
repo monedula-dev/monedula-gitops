@@ -316,8 +316,8 @@ type WriteOutcome struct {
 // <dir>/<namespace>/mirrors/<name>.yaml, policies at
 // <dir>/<namespace>/access/<name>.yaml, and users at
 // <dir>/<namespace>/users/<name>.yaml. Parent directories are created as
-// needed. Objects are processed in sorted order (topics, policies, quotas,
-// rolebindings, users, then schemas) so the Written/Skipped slices are
+// needed. Objects are processed in sorted order (topics, mirrors, policies,
+// quotas, rolebindings, users, then schemas) so the Written/Skipped slices are
 // deterministic.
 //
 // overwrite controls behavior when a target file already exists:

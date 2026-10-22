@@ -114,7 +114,7 @@ func TestImportUnhealthyMirrorWarns(t *testing.T) {
 
 	require.Len(t, res.Mirrors, 1)
 	require.Contains(t, res.Warnings, `MirrorUnhealthy: mirror topic "payments.orders" is PAUSED`)
-	require.True(t, res.Partial)
+	require.False(t, res.Partial, "MirrorUnhealthy is diagnostic only")
 }
 
 func TestImportMirrorConfigsOmitted(t *testing.T) {
@@ -219,4 +219,62 @@ func TestImportWithoutRESTUnchanged(t *testing.T) {
 	require.Empty(t, res.Mirrors)
 	require.Len(t, res.Topics, 2)
 	require.False(t, res.Partial)
+}
+
+func requireNoFallback(t *testing.T, res Result) {
+	t.Helper()
+	for _, w := range res.Warnings {
+		require.NotContains(t, w, "access reconstruction could not reproduce live state", "dropped ACLs must not trigger the all-explicit fallback")
+	}
+}
+
+func TestImportPendingStoppedDropsACLs(t *testing.T) {
+	// ACL sync is conclusively disabled, yet the deferred mirror's ACLs are
+	// still dropped: the topic is imported as neither kind.
+	k, r := mirrorFixture(t, "PENDING_STOPPED", nil, map[string]string{"acl.sync.enable": "false"}, mirrorACLs())
+	res := importWithREST(t, k, r)
+
+	require.NotContains(t, policyRuleNames(res), "payments.orders")
+	require.Contains(t, res.Warnings,
+		`ExternallyManagedOrAmbiguousACLs: 1 ACL(s) on mirror topic "payments.orders" were not imported (mirror is being promoted; re-run import after it finishes)`)
+	requireNoFallback(t, res)
+	require.True(t, res.Partial)
+	require.Len(t, res.Topics, 1)
+	require.Len(t, res.Topics[0].Spec.Access.Producers, 1)
+}
+
+func TestImportMirrorWithoutKafkaTopicFails(t *testing.T) {
+	k, r := mirrorFixture(t, "ACTIVE", nil, nil, nil)
+	r.AddMirror(kafkarest.Mirror{LinkName: "prod-to-dr", MirrorTopicName: "ghost",
+		SourceTopicName: "ghost", Status: "ACTIVE", NumPartitions: 1})
+	_, err := ReadSnapshot(context.Background(), k, nil, nil, nil,
+		SnapshotOptions{SkipUsers: true, SkipQuotas: true, REST: r})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `"ghost"`)
+	require.Contains(t, err.Error(), "Unknown")
+}
+
+func TestImportClusterIDMismatchFails(t *testing.T) {
+	k, r := mirrorFixture(t, "ACTIVE", nil, nil, nil)
+	k.SetClusterID("some-other-cluster")
+	_, err := ReadSnapshot(context.Background(), k, nil, nil, nil,
+		SnapshotOptions{SkipUsers: true, SkipQuotas: true, REST: r})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "ClusterIdentityMismatch")
+}
+
+func TestImportLinkConfigsUnreadableDropsACLs(t *testing.T) {
+	k, r := mirrorFixture(t, "ACTIVE", nil, map[string]string{"acl.sync.enable": "false"}, mirrorACLs())
+	r.Fail("LinkConfigs", errors.New("403 Forbidden"))
+	snap, err := ReadSnapshot(context.Background(), k, nil, nil, nil,
+		SnapshotOptions{SkipUsers: true, SkipQuotas: true, REST: r})
+	require.NoError(t, err)
+	require.Nil(t, snap.MirrorLinks["prod-to-dr"].ACLSync)
+
+	res := Build(snap, "dr", []string{"acl"}, nil)
+	require.NotContains(t, policyRuleNames(res), "payments.orders")
+	require.Contains(t, res.Warnings,
+		`ExternallyManagedOrAmbiguousACLs: 1 ACL(s) on mirror topic "payments.orders" were not imported (ACL sync on link "prod-to-dr" is enabled or unknown)`)
+	requireNoFallback(t, res)
+	require.True(t, res.Partial)
 }

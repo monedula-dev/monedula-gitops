@@ -55,7 +55,7 @@ type Result struct {
 }
 
 // Stable diagnostic codes that prefix mirror-import warnings so automation can
-// detect them; any of them marks the import as partial.
+// detect them; those in partialWarningCodes mark the import as partial.
 const (
 	codeMirrorConfigNotImported          = "MirrorConfigNotImported"
 	codeMirrorUnhealthy                  = "MirrorUnhealthy"
@@ -63,9 +63,10 @@ const (
 	codeExternallyManagedOrAmbiguousACLs = "ExternallyManagedOrAmbiguousACLs"
 )
 
+// MirrorUnhealthy is deliberately absent: an unhealthy mirror is imported in
+// full, so its warning is diagnostic only and does not make the import partial.
 var partialWarningCodes = []string{
 	codeMirrorConfigNotImported,
-	codeMirrorUnhealthy,
 	codeMirrorImportDeferred,
 	codeExternallyManagedOrAmbiguousACLs,
 }
@@ -344,12 +345,14 @@ func Build(snap Snapshot, clusterName string, accessBackends []string, mdsCfg *v
 }
 
 // filterMirrorACLs returns a copy of snap.ACLs without the literal topic ACLs
-// on mirror topics whose link has ACL sync enabled or unknown, warning once
-// per affected mirror. ACLs on mirrors whose link has ACL sync conclusively
+// on mirror topics whose link has ACL sync enabled or unknown, and on deferred
+// (PENDING_STOPPED) mirrors regardless of ACL sync (the topic is imported as
+// neither kind, so its ACLs have no owner yet), warning once per affected
+// mirror. ACLs on mirrors whose link has ACL sync conclusively
 // disabled are kept: they reach buildPolicies as raw rules (mirrors are not in
 // topicByName, so they never fold into a KafkaTopic).
 func filterMirrorACLs(snap Snapshot, warnings *[]string) []kafka.ACLState {
-	if len(snap.Mirrors) == 0 {
+	if len(snap.Mirrors) == 0 && len(snap.DeferredMirrors) == 0 {
 		return snap.ACLs
 	}
 	drop := map[string]string{} // mirror topic -> link name
@@ -357,6 +360,9 @@ func filterMirrorACLs(snap Snapshot, warnings *[]string) []kafka.ACLState {
 		if s := snap.MirrorLinks[m.LinkName].ACLSync; s == nil || *s {
 			drop[m.Name] = m.LinkName
 		}
+	}
+	for _, name := range snap.DeferredMirrors {
+		drop[name] = ""
 	}
 	counts := map[string]int{}
 	out := make([]kafka.ACLState, 0, len(snap.ACLs))
@@ -372,6 +378,13 @@ func filterMirrorACLs(snap Snapshot, warnings *[]string) []kafka.ACLState {
 			*warnings = append(*warnings, fmt.Sprintf(
 				"%s: %d ACL(s) on mirror topic %q were not imported (ACL sync on link %q is enabled or unknown)",
 				codeExternallyManagedOrAmbiguousACLs, n, m.Name, m.LinkName))
+		}
+	}
+	for _, name := range snap.DeferredMirrors {
+		if n := counts[name]; n > 0 {
+			*warnings = append(*warnings, fmt.Sprintf(
+				"%s: %d ACL(s) on mirror topic %q were not imported (mirror is being promoted; re-run import after it finishes)",
+				codeExternallyManagedOrAmbiguousACLs, n, name))
 		}
 	}
 	return out
