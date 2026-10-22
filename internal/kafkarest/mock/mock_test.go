@@ -112,3 +112,8 @@ func TestMockCreateMirrorRecorded(t *testing.T) {
 	require.NoError(t, c.AlterTopicConfigs(ctx, "m", map[string]string{"k": "v"}))
 	require.Equal(t, map[string]map[string]string{"m": {"k": "v"}}, c.Altered())
 }
+
+func TestMockFromFileRejectsUnknownFailureMethod(t *testing.T) {
+	_, err := FromFile(writeState(t, "failures:\n  - method: ListMirror\n    error: boom\n"))
+	require.ErrorContains(t, err, `unknown failures method "ListMirror"`)
+}

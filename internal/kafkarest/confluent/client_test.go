@@ -325,3 +325,32 @@ func TestPathEscaping(t *testing.T) {
 		t.Fatalf("raw path = %q", raw)
 	}
 }
+
+func TestListMirrorsLaterPageFailureIsError(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		page2 func(w http.ResponseWriter)
+	}{
+		{"403", func(w http.ResponseWriter) {
+			http.Error(w, `{"error_code":403,"message":"forbidden"}`, http.StatusForbidden)
+		}},
+		{"malformed", func(w http.ResponseWriter) { _, _ = w.Write([]byte("not json")) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var srv *httptest.Server
+			srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("page") == "2" {
+					tc.page2(w)
+					return
+				}
+				writeJSON(w, map[string]any{"metadata": map[string]any{"next": srv.URL + "/v3/clusters/c1/links/-/mirrors?page=2"},
+					"data": []any{mirror("t1")}})
+			}))
+			defer srv.Close()
+			ms, err := mustNew(t, srv.URL, "c1", nil).ListMirrors(t.Context())
+			if err == nil || ms != nil {
+				t.Fatalf("ms=%v err=%v", ms, err)
+			}
+		})
+	}
+}

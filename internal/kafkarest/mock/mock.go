@@ -51,6 +51,12 @@ type fileMirror struct {
 	NumPartitions   int    `json:"numPartitions"`
 }
 
+// failableMethods are the Client methods a failures entry may name.
+var failableMethods = map[string]bool{
+	"ClusterID": true, "ListLinks": true, "LinkConfigs": true,
+	"ListMirrors": true, "CreateMirror": true, "AlterTopicConfigs": true,
+}
+
 type fileFailure struct {
 	Method string `json:"method"`
 	Error  string `json:"error"`
@@ -88,6 +94,9 @@ func FromFile(path string) (*Client, error) {
 	for _, f := range fs.Failures {
 		if f.Method == "" || f.Error == "" {
 			return nil, fmt.Errorf("rest state file %q: a failures entry needs both method and error", path)
+		}
+		if !failableMethods[f.Method] {
+			return nil, fmt.Errorf("rest state file %q: unknown failures method %q", path, f.Method)
 		}
 		c.Fail(f.Method, errors.New(f.Error))
 	}
