@@ -1,0 +1,19 @@
+# REST mock for mirror import: ACL sync disabled on prod-to-dr.
+clusterId: dr-cluster-id
+links:
+  - name: prod-to-dr
+    state: ACTIVE
+    configs:
+      acl.sync.enable: "false"
+      cluster.link.prefix: ""
+mirrors:
+  - linkName: prod-to-dr
+    mirrorTopicName: payments.orders
+    sourceTopicName: payments.orders
+    status: ACTIVE
+    numPartitions: 3
+  - linkName: prod-to-dr
+    mirrorTopicName: payments.pending
+    sourceTopicName: payments.pending
+    status: PENDING_STOPPED
+    numPartitions: 3

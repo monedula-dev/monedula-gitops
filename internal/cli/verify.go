@@ -13,7 +13,9 @@ import (
 //
 // Mode semantics (spec §16): drift on Enforce and DetectOnly resources counts
 // toward the exit-1 contract; ObserveOnly drift is rendered but is informational
-// and never fails the run.
+// and never fails the run. Informational findings (MirrorTopicProgressing) are
+// rendered but never count as drift. Operational errors (StateReadError: live
+// state could not be read) fail with exit 2 in every mode.
 func newVerifyCmd() *cobra.Command {
 	var f sharedFlags
 	cmd := &cobra.Command{
@@ -26,7 +28,18 @@ func newVerifyCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Live state that could not be read is an operational error, not
+			// drift: it fails the run (exit 2) whatever the resource's mode,
+			// because verify cannot vouch for state it did not see.
 			for _, op := range ops {
+				if operations.OperationalError(op.Action) {
+					return &ExitError{Code: 2, Msg: "live state could not be read; see StateReadError operations"}
+				}
+			}
+			for _, op := range ops {
+				if operations.Informational(op.Action) {
+					continue // expected transient state (e.g. a mirror still being set up)
+				}
 				if op.Mode != operations.ModeObserveOnly {
 					return &ExitError{Code: 1, Msg: ""}
 				}

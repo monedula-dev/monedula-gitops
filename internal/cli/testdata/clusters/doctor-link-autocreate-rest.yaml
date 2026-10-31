@@ -1,0 +1,8 @@
+clusterId: dr-cluster-id
+links:
+  - name: prod-to-dr
+    state: ACTIVE
+    configs:
+      auto.create.mirror.topics.enable: "true"
+      cluster.link.prefix: "dr."
+mirrors: []

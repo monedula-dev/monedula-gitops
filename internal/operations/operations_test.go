@@ -55,3 +55,38 @@ func TestNewRejected(t *testing.T) {
 	require.Equal(t, Risk(""), op.Risk)
 	require.False(t, op.RequiresApproval)
 }
+
+func TestMirrorExecutableTaxonomy(t *testing.T) {
+	for _, a := range []Action{CreateMirrorTopic, UpdateMirrorTopicConfig} {
+		op := New(a)
+		require.Equal(t, RiskLow, op.Risk, a)
+		require.False(t, op.RequiresApproval, a)
+		_, inTaxonomy := taxonomy[a]
+		require.True(t, inTaxonomy, a)
+	}
+}
+
+func TestNonExecutableActionsHaveNoRisk(t *testing.T) {
+	for _, a := range []Action{
+		MirrorTopicUnhealthy, MirrorTopicStopping, MirrorTopicPromoted,
+		MirrorTopicProgressing, UnsupportedReplicationFactorChange, StateReadError,
+	} {
+		require.Equal(t, RiskNone, RiskOf(a), a)
+		require.Equal(t, GateNone, GateOf(a), a)
+		require.False(t, New(a).RequiresApproval, a)
+		_, inTaxonomy := taxonomy[a]
+		require.False(t, inTaxonomy, a)
+	}
+}
+
+func TestInformationalAndOperationalError(t *testing.T) {
+	all := []Action{
+		CreateMirrorTopic, UpdateMirrorTopicConfig, MirrorTopicUnhealthy, MirrorTopicStopping,
+		MirrorTopicPromoted, MirrorTopicProgressing, UnsupportedReplicationFactorChange,
+		StateReadError, Rejected, CreateTopic,
+	}
+	for _, a := range all {
+		require.Equal(t, a == MirrorTopicProgressing, Informational(a), a)
+		require.Equal(t, a == StateReadError, OperationalError(a), a)
+	}
+}

@@ -22,7 +22,7 @@ func newValidateCmd() *cobra.Command {
 			if err != nil {
 				return &ExitError{Code: 2, Msg: err.Error()}
 			}
-			n := len(plan.Topics) + len(plan.Policies) + len(plan.Quotas) + len(plan.RoleBindings)
+			n := len(plan.Topics) + len(plan.Policies) + len(plan.Quotas) + len(plan.RoleBindings) + len(plan.MirrorTopics)
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%d resource(s) valid\n", n)
 			return nil
 		},

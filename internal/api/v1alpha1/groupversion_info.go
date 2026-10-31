@@ -28,6 +28,7 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&KafkaQuota{}, &KafkaQuotaList{},
 		&KafkaRoleBinding{}, &KafkaRoleBindingList{},
 		&KafkaUser{}, &KafkaUserList{},
+		&KafkaMirrorTopic{}, &KafkaMirrorTopicList{},
 	)
 	metav1.AddToGroupVersion(scheme, GroupVersion)
 	return nil

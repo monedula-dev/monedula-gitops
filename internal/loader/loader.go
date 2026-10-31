@@ -30,6 +30,7 @@ type Object struct {
 	Quota       *v1alpha1.KafkaQuota
 	RoleBinding *v1alpha1.KafkaRoleBinding
 	User        *v1alpha1.KafkaUser
+	MirrorTopic *v1alpha1.KafkaMirrorTopic
 }
 
 var supportedExt = map[string]bool{".yaml": true, ".yml": true, ".json": true}
@@ -204,6 +205,9 @@ func decodeTyped(yml []byte, source string) (Object, error) {
 	case "KafkaUser":
 		o.User = &v1alpha1.KafkaUser{}
 		err = yaml.UnmarshalStrict(yml, o.User)
+	case "KafkaMirrorTopic":
+		o.MirrorTopic = &v1alpha1.KafkaMirrorTopic{}
+		err = yaml.UnmarshalStrict(yml, o.MirrorTopic)
 	default:
 		return Object{}, fmt.Errorf("%s: unknown kind %q", source, tm.Kind)
 	}

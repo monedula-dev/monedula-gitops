@@ -1,0 +1,7 @@
+# Kafka mock for the destination cluster: same cluster ID as the REST mock,
+# payments.orders not present yet.
+clusterId: dr-cluster-id
+topics:
+  - name: unrelated
+    partitions: 1
+    replicationFactor: 3

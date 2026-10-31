@@ -1,0 +1,15 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: dr
+spec:
+  bootstrapServers: dr:9092
+  rest:
+    endpoint: https://dr:8090/kafka
+---
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: other
+spec:
+  bootstrapServers: other:9092

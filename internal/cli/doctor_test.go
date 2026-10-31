@@ -174,7 +174,7 @@ func TestDoctorJSONOutput(t *testing.T) {
 	for _, c := range doc.Checks {
 		names = append(names, c.Name)
 	}
-	require.Equal(t, []string{"config", "kafka-connect", "kafka-admin", "acl-read", "mds", "schema-registry"}, names)
+	require.Equal(t, []string{"config", "kafka-connect", "kafka-admin", "acl-read", "mds", "schema-registry", "rest"}, names)
 }
 
 func TestDoctorJSONOutputUnhealthy(t *testing.T) {
@@ -214,4 +214,87 @@ func TestDoctorOAuthBearerConfigPasses(t *testing.T) {
 	// Security invariant: no secrets in output.
 	require.NotContains(t, out, "test-client-secret")
 	require.NotContains(t, out, "test-client-id")
+}
+
+func TestDoctorRESTSkippedWithoutRest(t *testing.T) {
+	out, err := run(t, "doctor", "--cluster-config-file", "testdata/clusters/dev.yaml")
+	require.NoError(t, err)
+	require.Contains(t, out, "SKIP rest: Kafka REST not configured; mirror topics unavailable and KafkaTopic cannot detect out-of-band mirrors")
+	require.NotContains(t, out, "rest-cluster-binding")
+}
+
+func TestDoctorRESTHealthy(t *testing.T) {
+	out, err := run(t, "doctor", "--cluster-config-file", "testdata/clusters/mirror-cluster.yaml")
+	require.NoError(t, err)
+	require.Contains(t, out, "PASS rest: dr-cluster-id")
+	require.Contains(t, out, "PASS rest-cluster-binding: kafka=dr-cluster-id rest=dr-cluster-id")
+	require.Contains(t, out, "PASS rest-mirrors: 0 mirror topics (read-only checks; create/alter permissions not tested)")
+	require.Contains(t, out, "PASS link:prod-to-dr: state=ACTIVE prefix=none")
+}
+
+func TestDoctorRESTClusterMismatchFails(t *testing.T) {
+	out, err := run(t, "doctor", "--cluster-config-file", "testdata/clusters/mirror-idmismatch-cluster.yaml")
+	requireExitCode(t, err, 2)
+	require.Contains(t, out, "FAIL rest-cluster-binding: ClusterIdentityMismatch: kafka=some-other-cluster-id rest=dr-cluster-id")
+}
+
+func TestDoctorRESTDownReportsAllChecks(t *testing.T) {
+	out, err := run(t, "doctor", "--cluster-config-file", "testdata/clusters/doctor-rest-allfail-cluster.yaml")
+	requireExitCode(t, err, 2)
+	require.Contains(t, out, "FAIL rest: ")
+	require.Contains(t, out, "FAIL rest-cluster-binding: ")
+	require.Contains(t, out, "FAIL rest-mirrors: ")
+	require.Contains(t, out, "FAIL links: ")
+}
+
+func TestDoctorRESTMirrorsFailure(t *testing.T) {
+	out, err := run(t, "doctor", "--cluster-config-file", "testdata/clusters/mirror-rest-down-cluster.yaml")
+	requireExitCode(t, err, 2)
+	require.Contains(t, out, "PASS rest:")
+	require.Contains(t, out, "FAIL rest-mirrors:")
+	require.Contains(t, out, "503")
+	require.Contains(t, out, "PASS link:prod-to-dr")
+}
+
+func TestDoctorLinkAutoCreateWarns(t *testing.T) {
+	out, err := run(t, "doctor", "--cluster-config-file", "testdata/clusters/doctor-link-autocreate-cluster.yaml")
+	require.NoError(t, err)
+	require.Contains(t, out, "WARN link:prod-to-dr: state=ACTIVE prefix=dr. (auto.create.mirror.topics.enable=true; mirrors may be created outside Git)")
+	require.Contains(t, out, "healthy")
+
+	js, err := run(t, "doctor", "--cluster-config-file", "testdata/clusters/doctor-link-autocreate-cluster.yaml", "-o", "json")
+	require.NoError(t, err)
+	var doc struct {
+		Checks  []struct{ Name, Status string } `json:"checks"`
+		Healthy bool                            `json:"healthy"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(js), &doc))
+	require.True(t, doc.Healthy)
+	found := false
+	for _, c := range doc.Checks {
+		if c.Name == "link:prod-to-dr" {
+			found = true
+			require.Equal(t, "warn", c.Status)
+		}
+	}
+	require.True(t, found)
+}
+
+func TestDoctorLinkPausedWarns(t *testing.T) {
+	out, err := run(t, "doctor", "--cluster-config-file", "testdata/clusters/doctor-link-paused-cluster.yaml")
+	require.NoError(t, err)
+	require.Contains(t, out, "WARN link:prod-to-dr: state=PAUSED prefix=none (link is paused)")
+}
+
+func TestDoctorLinkNotActiveFailsWithLinkError(t *testing.T) {
+	out, err := run(t, "doctor", "--cluster-config-file", "testdata/clusters/doctor-link-failed-cluster.yaml")
+	requireExitCode(t, err, 2)
+	require.Contains(t, out, "WARN link:legacy-link: state=LINK_PAUSED prefix=none (link is paused)\n")
+	require.Contains(t, out, "FAIL link:prod-to-dr: state=FAILED prefix=none: AUTHENTICATION_ERROR\n")
+}
+
+func TestDoctorRESTConfiguredClusterIDNotContacted(t *testing.T) {
+	out, err := run(t, "doctor", "--cluster-config-file", "testdata/clusters/doctor-rest-clusterid-cluster.yaml")
+	require.NoError(t, err)
+	require.Contains(t, out, "PASS rest: clusterId dr-cluster-id (configured; reachability checked by rest-mirrors)")
 }

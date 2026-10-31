@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -149,6 +150,19 @@ func runImportCluster(cmd *cobra.Command, f *importFlags) error {
 	}
 	mdsScopes := importer.ScopesFromMDSConfig(mdsCfg)
 
+	// 4c'. Build the Kafka REST client (nil when the cluster has no rest
+	// block): with it, topics are classified against cluster-link mirror state
+	// and live mirrors import as KafkaMirrorTopic. Without it, import is
+	// unchanged.
+	restClient, err := buildRESTClient(plan, f.clusterConfigFiles)
+	if err != nil {
+		var ee *ExitError
+		if errors.As(err, &ee) {
+			return ee
+		}
+		return &ExitError{Code: 2, Msg: err.Error()}
+	}
+
 	// 4d. Resolve the connecting principal (bare username, no "User:" prefix)
 	// so users import can skip it by default (self-lockout guard). Resolution
 	// mirrors printLockoutWarnings/connectingPrincipal: it returns "" when the
@@ -159,7 +173,7 @@ func runImportCluster(cmd *cobra.Command, f *importFlags) error {
 
 	// 5. Read a deterministic snapshot of live state (read-only; never mutates).
 	snap, err := importer.ReadSnapshot(ctx, client, srClient, mdsClient, mdsScopes,
-		importer.SnapshotOptions{SkipUsers: f.skipUsers, SkipQuotas: f.skipQuotas, IncludeInternal: f.includeInternal})
+		importer.SnapshotOptions{SkipUsers: f.skipUsers, SkipQuotas: f.skipQuotas, IncludeInternal: f.includeInternal, REST: restClient})
 	if err != nil {
 		return &ExitError{Code: 2, Msg: err.Error()}
 	}

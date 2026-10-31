@@ -48,6 +48,8 @@ type Plan struct {
 	RoleBindings    []*v1alpha1.KafkaRoleBinding
 	// Users holds validated+defaulted KafkaUser resources (all clusters).
 	Users               []*v1alpha1.KafkaUser
+	MirrorTopics        []*v1alpha1.KafkaMirrorTopic // selected + defaulted
+	DesiredMirrors      []diff.DesiredMirror
 	DesiredTopics       []diff.DesiredTopic
 	DesiredSchemas      []diff.DesiredSchema
 	DesiredACLs         []access.ACL
@@ -80,6 +82,7 @@ func Build(opts Options) (*Plan, error) {
 	var quotas []*v1alpha1.KafkaQuota
 	var roleBindings []*v1alpha1.KafkaRoleBinding
 	var users []*v1alpha1.KafkaUser
+	var mirrors []*v1alpha1.KafkaMirrorTopic
 	clusters := map[string]*v1alpha1.KafkaCluster{}
 	// topicSource maps each loaded topic to the file path (or "stdin") it came
 	// from, so schema-file refs can be resolved relative to the manifest.
@@ -101,6 +104,8 @@ func Build(opts Options) (*Plan, error) {
 			roleBindings = append(roleBindings, o.RoleBinding)
 		case o.User != nil:
 			users = append(users, o.User)
+		case o.MirrorTopic != nil:
+			mirrors = append(mirrors, o.MirrorTopic)
 		}
 	}
 
@@ -175,6 +180,13 @@ func Build(opts Options) (*Plan, error) {
 			}
 		}
 		users = fu
+		var fm []*v1alpha1.KafkaMirrorTopic
+		for _, m := range mirrors {
+			if m.Spec.ClusterRef.Name == opts.Cluster {
+				fm = append(fm, m)
+			}
+		}
+		mirrors = fm
 	}
 
 	// 5. Apply defaults.
@@ -194,6 +206,9 @@ func Build(opts Options) (*Plan, error) {
 	for _, u := range users {
 		defaulting.User(u)
 	}
+	for _, m := range mirrors {
+		defaulting.MirrorTopic(m)
+	}
 
 	// 6. Validate.
 	// validationClusters stays nil (not an empty map) when no cluster config was
@@ -204,7 +219,7 @@ func Build(opts Options) (*Plan, error) {
 	if clustersLoaded {
 		validationClusters = clusters
 	}
-	if verrs := validation.Validate(validation.Input{Topics: topics, Policies: policies, Quotas: quotas, Clusters: validationClusters, RoleBindings: roleBindings, Users: users}); len(verrs) > 0 {
+	if verrs := validation.Validate(validation.Input{Topics: topics, Policies: policies, Quotas: quotas, Clusters: validationClusters, RoleBindings: roleBindings, Users: users, MirrorTopics: mirrors}); len(verrs) > 0 {
 		return nil, aggregate(verrs)
 	}
 
@@ -307,6 +322,29 @@ func Build(opts Options) (*Plan, error) {
 			dt.IgnoreFields = tp.Spec.Drift.IgnoreFields // spec §16
 		}
 		desiredTopics = append(desiredTopics, dt)
+	}
+
+	// 8b. Compile desired mirror topics. TopicName is the effective
+	// destination name; TopicNameExplicit records whether spec.topicName was
+	// declared (defaulting never writes it).
+	var desiredMirrors []diff.DesiredMirror
+	for _, m := range mirrors {
+		rf := 0
+		if m.Spec.ReplicationFactor != nil {
+			rf = *m.Spec.ReplicationFactor
+		}
+		desiredMirrors = append(desiredMirrors, diff.DesiredMirror{
+			Kind:              "KafkaMirrorTopic",
+			Namespace:         m.Namespace,
+			Name:              m.Name,
+			LinkName:          m.Spec.LinkName,
+			SourceTopicName:   m.Spec.SourceTopicName,
+			TopicName:         m.Spec.EffectiveTopicName(),
+			TopicNameExplicit: m.Spec.TopicName != "",
+			ReplicationFactor: rf,
+			Config:            m.Spec.Config,
+			Mode:              m.Spec.Reconciliation.Mode,
+		})
 	}
 
 	// 9. Assemble desired schema state. Subject names follow spec.schema.
@@ -562,6 +600,8 @@ func Build(opts Options) (*Plan, error) {
 		Quotas:              quotas,
 		RoleBindings:        roleBindings,
 		Users:               users,
+		MirrorTopics:        mirrors,
+		DesiredMirrors:      desiredMirrors,
 		DesiredTopics:       desiredTopics,
 		DesiredSchemas:      desiredSchemas,
 		DesiredACLs:         desiredACLs,

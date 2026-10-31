@@ -603,6 +603,278 @@ spec:
                   topicDeletionPolicy:
                     type: string
                 type: object
+              rest:
+                description: REST is the Kafka REST / cluster-linking endpoint used
+                  by KafkaMirrorTopic.
+                properties:
+                  auth:
+                    description: |-
+                      MDSAuth authenticates to MDS. Type selects the method; credentials resolve via
+                      the secret machinery (basic: Username/Password; bearer: Token; mtls: TLS client cert).
+                    properties:
+                      password:
+                        properties:
+                          valueFrom:
+                            properties:
+                              configMapKeyRef:
+                                description: |-
+                                  ConfigMapKeyRef reads a ConfigMap key (operator mode only).
+                                  Uses the same {Name, Key} shape as SecretKeyRef; no Secret is involved.
+                                properties:
+                                  key:
+                                    type: string
+                                  name:
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                              env:
+                                type: string
+                              file:
+                                type: string
+                              inline:
+                                description: Inline is the literal value verbatim
+                                  (intended for schema bodies).
+                                type: string
+                              secretKeyRef:
+                                properties:
+                                  key:
+                                    type: string
+                                  name:
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                            type: object
+                        required:
+                        - valueFrom
+                        type: object
+                      token:
+                        properties:
+                          valueFrom:
+                            properties:
+                              configMapKeyRef:
+                                description: |-
+                                  ConfigMapKeyRef reads a ConfigMap key (operator mode only).
+                                  Uses the same {Name, Key} shape as SecretKeyRef; no Secret is involved.
+                                properties:
+                                  key:
+                                    type: string
+                                  name:
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                              env:
+                                type: string
+                              file:
+                                type: string
+                              inline:
+                                description: Inline is the literal value verbatim
+                                  (intended for schema bodies).
+                                type: string
+                              secretKeyRef:
+                                properties:
+                                  key:
+                                    type: string
+                                  name:
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                            type: object
+                        required:
+                        - valueFrom
+                        type: object
+                      type:
+                        enum:
+                        - basic
+                        - bearer
+                        - mtls
+                        type: string
+                      username:
+                        properties:
+                          valueFrom:
+                            properties:
+                              configMapKeyRef:
+                                description: |-
+                                  ConfigMapKeyRef reads a ConfigMap key (operator mode only).
+                                  Uses the same {Name, Key} shape as SecretKeyRef; no Secret is involved.
+                                properties:
+                                  key:
+                                    type: string
+                                  name:
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                              env:
+                                type: string
+                              file:
+                                type: string
+                              inline:
+                                description: Inline is the literal value verbatim
+                                  (intended for schema bodies).
+                                type: string
+                              secretKeyRef:
+                                properties:
+                                  key:
+                                    type: string
+                                  name:
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                            type: object
+                        required:
+                        - valueFrom
+                        type: object
+                    required:
+                    - type
+                    type: object
+                  clusterId:
+                    type: string
+                  endpoint:
+                    type: string
+                  tls:
+                    properties:
+                      caCert:
+                        description: |-
+                          CACert is the PEM of the CA (bundle) to trust for server verification,
+                          resolved like any other secret value: file/env/inline in CLI mode,
+                          secretKeyRef in operator mode. Nil = system trust store.
+                        properties:
+                          valueFrom:
+                            properties:
+                              configMapKeyRef:
+                                description: |-
+                                  ConfigMapKeyRef reads a ConfigMap key (operator mode only).
+                                  Uses the same {Name, Key} shape as SecretKeyRef; no Secret is involved.
+                                properties:
+                                  key:
+                                    type: string
+                                  name:
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                              env:
+                                type: string
+                              file:
+                                type: string
+                              inline:
+                                description: Inline is the literal value verbatim
+                                  (intended for schema bodies).
+                                type: string
+                              secretKeyRef:
+                                properties:
+                                  key:
+                                    type: string
+                                  name:
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                            type: object
+                        required:
+                        - valueFrom
+                        type: object
+                      clientCert:
+                        properties:
+                          valueFrom:
+                            properties:
+                              configMapKeyRef:
+                                description: |-
+                                  ConfigMapKeyRef reads a ConfigMap key (operator mode only).
+                                  Uses the same {Name, Key} shape as SecretKeyRef; no Secret is involved.
+                                properties:
+                                  key:
+                                    type: string
+                                  name:
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                              env:
+                                type: string
+                              file:
+                                type: string
+                              inline:
+                                description: Inline is the literal value verbatim
+                                  (intended for schema bodies).
+                                type: string
+                              secretKeyRef:
+                                properties:
+                                  key:
+                                    type: string
+                                  name:
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                            type: object
+                        required:
+                        - valueFrom
+                        type: object
+                      clientKey:
+                        properties:
+                          valueFrom:
+                            properties:
+                              configMapKeyRef:
+                                description: |-
+                                  ConfigMapKeyRef reads a ConfigMap key (operator mode only).
+                                  Uses the same {Name, Key} shape as SecretKeyRef; no Secret is involved.
+                                properties:
+                                  key:
+                                    type: string
+                                  name:
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                              env:
+                                type: string
+                              file:
+                                type: string
+                              inline:
+                                description: Inline is the literal value verbatim
+                                  (intended for schema bodies).
+                                type: string
+                              secretKeyRef:
+                                properties:
+                                  key:
+                                    type: string
+                                  name:
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                            type: object
+                        required:
+                        - valueFrom
+                        type: object
+                      enabled:
+                        type: boolean
+                      insecureSkipVerify:
+                        type: boolean
+                    required:
+                    - enabled
+                    type: object
+                required:
+                - endpoint
+                type: object
               schemaRegistry:
                 properties:
                   auth:

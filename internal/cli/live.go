@@ -8,6 +8,8 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/cluster"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka/mock"
+	"github.com/monedula-dev/monedula-gitops/internal/kafkarest"
+	restmock "github.com/monedula-dev/monedula-gitops/internal/kafkarest/mock"
 	"github.com/monedula-dev/monedula-gitops/internal/mds"
 	mdsmock "github.com/monedula-dev/monedula-gitops/internal/mds/mock"
 	"github.com/monedula-dev/monedula-gitops/internal/pipeline"
@@ -34,6 +36,13 @@ const mockSchemaAnnotation = "gitops.monedula.dev/mock-schema-file"
 // present on the selected KafkaCluster, buildMDSClient returns a mock seeded
 // from that file instead of dialing a real MDS endpoint.
 const mockMDSAnnotation = "gitops.monedula.dev/mock-mds-file"
+
+// mockRESTAnnotation names a file holding mock Kafka REST v3 (cluster link and
+// mirror) state for a cluster. It is the hermetic test seam mirroring
+// mockStateAnnotation: when present on the selected KafkaCluster,
+// buildRESTClient returns a mock seeded from that file instead of dialing a
+// real REST endpoint.
+const mockRESTAnnotation = "gitops.monedula.dev/mock-rest-file"
 
 // buildLiveClient resolves the live AdminClient for the selected cluster and a
 // cleanup func the caller must defer.
@@ -142,6 +151,37 @@ func buildMDSClient(plan *pipeline.Plan, clusterConfigFiles []string) (mds.Clien
 
 	// No mock: build the real client (returns nil when MDS not configured).
 	return cluster.BuildMDSClient(cl, secrets.FileEnvResolver{BaseDir: base})
+}
+
+// buildRESTClient resolves the Kafka REST v3 client for the selected cluster, or
+// (nil, nil) when the cluster has no spec.rest and no mock annotation.
+//
+// Hermetic seam: if the selected KafkaCluster carries the mock-rest annotation
+// the client is seeded from that file (path resolved like mock-state).
+// Otherwise a real client is built from spec.rest, resolving credentials via
+// internal/secrets relative to the cluster-config directory. When several
+// clusters are loaded and none is selected the error is already an
+// *ExitError{Code: 2}; every other error (mock file, spec.rest or credential
+// resolution) is returned plain. Callers pass an *ExitError through unchanged
+// and wrap any other error as ExitError{Code: 2}.
+func buildRESTClient(plan *pipeline.Plan, clusterConfigFiles []string) (kafkarest.Client, error) {
+	if plan.SelectedCluster == "" {
+		return nil, &ExitError{Code: 2, Msg: "multiple clusters loaded; use --cluster to select one"}
+	}
+	cl := plan.Clusters[plan.SelectedCluster]
+
+	base := baseDir(clusterConfigFiles)
+
+	if cl != nil {
+		if rf := cl.Annotations[mockRESTAnnotation]; rf != "" {
+			c, err := restmock.FromFile(filepath.Join(base, rf))
+			if err != nil {
+				return nil, err // no typed-nil *mock.Client in the interface
+			}
+			return c, nil
+		}
+	}
+	return cluster.BuildKafkaRESTClient(cl, secrets.FileEnvResolver{BaseDir: base})
 }
 
 // fromMDSRoleBindings converts mds.RoleBinding (wire type) to rbac.RoleBinding

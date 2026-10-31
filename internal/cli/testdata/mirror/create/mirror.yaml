@@ -1,0 +1,11 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaMirrorTopic
+metadata:
+  name: orders-dr
+spec:
+  clusterRef:
+    name: dr
+  linkName: prod-to-dr
+  sourceTopicName: payments.orders
+  config:
+    retention.ms: "604800000"

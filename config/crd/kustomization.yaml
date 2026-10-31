@@ -7,3 +7,4 @@ resources:
 - gitops.monedula.dev_kafkaquotas.yaml
 - gitops.monedula.dev_kafkarolebindings.yaml
 - gitops.monedula.dev_kafkausers.yaml
+- gitops.monedula.dev_kafkamirrortopics.yaml

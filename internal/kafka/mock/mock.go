@@ -41,6 +41,9 @@ type Client struct {
 	// failures maps a call signature ("<method> <target>") to the error that
 	// should be returned for that call. Populated via FailOn.
 	failures map[string]error
+
+	// clusterID is returned by ClusterID; empty means unset (an error).
+	clusterID string
 }
 
 // scramEntry is the mock's internal record for one (user, mechanism) SCRAM
@@ -59,6 +62,7 @@ type scramEntry struct {
 // fileState mirrors the on-disk YAML fixture. JSON tags drive the lowercase
 // field mapping via sigs.k8s.io/yaml (YAML -> JSON -> struct).
 type fileState struct {
+	ClusterID        string        `json:"clusterId"`
 	Topics           []fileTopic   `json:"topics"`
 	ACLs             []fileACL     `json:"acls"`
 	Quotas           []fileQuota   `json:"quotas"`
@@ -200,6 +204,7 @@ func FromFile(path string) (*Client, error) {
 	}
 
 	c := New(topics, acls)
+	c.clusterID = fs.ClusterID
 	for _, fq := range fs.Quotas {
 		entity := make([]kafka.QuotaEntityComponent, 0, len(fq.Entity))
 		for _, fe := range fq.Entity {
@@ -687,3 +692,17 @@ func (c *Client) ScramUpsertCount(user, mechanism string) int {
 // and real-adapter behavior aligned for callers that inspect Iterations after
 // an upsert with Iterations: 0.
 const defaultScramIterations = 4096
+
+// SetClusterID sets the cluster ID returned by ClusterID.
+func (c *Client) SetClusterID(id string) { c.clusterID = id }
+
+// ClusterID returns the configured cluster ID, or an error when unset.
+func (c *Client) ClusterID(_ context.Context) (string, error) {
+	if err := c.failures[failKey("ClusterID", "")]; err != nil {
+		return "", err
+	}
+	if c.clusterID == "" {
+		return "", errors.New("mock: cluster id not set")
+	}
+	return c.clusterID, nil
+}

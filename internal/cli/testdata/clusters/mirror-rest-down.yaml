@@ -1,0 +1,11 @@
+# REST mock whose ListMirrors call fails: mirror state is unknown.
+clusterId: dr-cluster-id
+links:
+  - name: prod-to-dr
+    state: ACTIVE
+    configs:
+      topic.config.sync.include: "cleanup.policy"
+      cluster.link.prefix: ""
+failures:
+  - method: ListMirrors
+    error: "503 Service Unavailable"

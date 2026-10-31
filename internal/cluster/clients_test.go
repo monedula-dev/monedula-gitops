@@ -9,8 +9,10 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -341,4 +343,58 @@ func TestBuildHTTPClientTLS_InvalidCACert_MDSLabel(t *testing.T) {
 	require.Contains(t, err.Error(), "mds tls.caCert")
 	// SECURITY: must not echo the (rejected) payload material.
 	require.NotContains(t, err.Error(), "not a pem")
+}
+
+func TestBuildKafkaRESTClientNilWithoutREST(t *testing.T) {
+	c, err := BuildKafkaRESTClient(&v1alpha1.KafkaCluster{}, stubResolver{val: "x"})
+	require.NoError(t, err)
+	require.Nil(t, c)
+	c, err = BuildKafkaRESTClient(nil, stubResolver{})
+	require.NoError(t, err)
+	require.Nil(t, c)
+}
+
+func TestBuildKafkaRESTClientBasicAuth(t *testing.T) {
+	var gotAuth, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("REST_USER", "alice")
+	t.Setenv("REST_PASS", "s3cret")
+	env := func(n string) *v1alpha1.ValueFrom {
+		return &v1alpha1.ValueFrom{ValueFrom: v1alpha1.ValueSource{Env: n}}
+	}
+	cl := &v1alpha1.KafkaCluster{Spec: v1alpha1.KafkaClusterSpec{REST: &v1alpha1.KafkaRESTConfig{
+		Endpoint:  srv.URL,
+		ClusterID: "dest-1",
+		Auth:      &v1alpha1.MDSAuth{Type: "basic", Username: env("REST_USER"), Password: env("REST_PASS")},
+	}}}
+	c, err := BuildKafkaRESTClient(cl, secrets.FileEnvResolver{BaseDir: "."})
+	require.NoError(t, err)
+	require.NotNil(t, c)
+
+	_, err = c.ListLinks(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "/v3/clusters/dest-1/links", gotPath)
+	require.Equal(t, "Basic "+base64.StdEncoding.EncodeToString([]byte("alice:s3cret")), gotAuth)
+}
+
+func TestBuildKafkaRESTClientAuthErrors(t *testing.T) {
+	mk := func(a *v1alpha1.MDSAuth) *v1alpha1.KafkaCluster {
+		return &v1alpha1.KafkaCluster{Spec: v1alpha1.KafkaClusterSpec{REST: &v1alpha1.KafkaRESTConfig{Endpoint: "https://x:8090", Auth: a}}}
+	}
+	_, err := BuildKafkaRESTClient(mk(&v1alpha1.MDSAuth{Type: "basic"}), stubResolver{})
+	require.ErrorContains(t, err, "rest: basic auth requires username and password")
+	_, err = BuildKafkaRESTClient(mk(&v1alpha1.MDSAuth{Type: "bearer"}), stubResolver{})
+	require.ErrorContains(t, err, "rest: bearer auth requires token")
+	_, err = BuildKafkaRESTClient(mk(&v1alpha1.MDSAuth{Type: "weird"}), stubResolver{})
+	require.ErrorContains(t, err, "unsupported auth type")
+	tok := &v1alpha1.ValueFrom{}
+	_, err = BuildKafkaRESTClient(mk(&v1alpha1.MDSAuth{Type: "bearer", Token: tok}), stubResolver{err: errors.New("nope")})
+	require.ErrorContains(t, err, "rest: resolving auth.token")
 }
