@@ -765,3 +765,58 @@ func TestValidateCountsMirrorTopics(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, out, "1 resource(s) valid")
 }
+
+// TestImportClusterTopicFilter: --topic narrows the import to the matching
+// topics and the ACLs that belong to them; the unrelated topic and the
+// admin's prefixed ACL on "search." are left out and counted in the summary.
+func TestImportClusterTopicFilter(t *testing.T) {
+	stdout, stderr, err := runSplit(t, "import", "cluster",
+		"--cluster-config-file", "testdata/clusters/importable.yaml",
+		"--topic", "payments.*")
+	require.NoError(t, err)
+	require.Contains(t, stdout, "payments.orders")
+	require.Contains(t, stdout, "User:svc-checkout")
+	require.Contains(t, stdout, "User:svc-rep")
+	require.NotContains(t, stdout, "search.")
+	require.NotContains(t, stdout, "User:admin")
+	require.Contains(t, stderr, "Topic filter: left out 1 topics, 1 ACLs, 0 role bindings, 0 schema subjects")
+}
+
+func TestImportClusterExcludeTopic(t *testing.T) {
+	stdout, _, err := runSplit(t, "import", "cluster",
+		"--cluster-config-file", "testdata/clusters/importable.yaml",
+		"--exclude-topic", "payments.*")
+	require.NoError(t, err)
+	require.Contains(t, stdout, "search.idx")
+	require.NotContains(t, stdout, "payments.orders")
+}
+
+func TestImportClusterTopicFilterSummaryJSON(t *testing.T) {
+	dir := t.TempDir()
+	out, err := run(t, "import", "cluster",
+		"--cluster-config-file", "testdata/clusters/importable.yaml",
+		"--output-dir", dir,
+		"--topic", "payments.*",
+		"-o", "json")
+	require.NoError(t, err)
+	require.Contains(t, out, `"filtered"`)
+	require.Contains(t, out, `"payments.*"`)
+}
+
+func TestImportClusterNoFilterOmitsFilterSummary(t *testing.T) {
+	_, stderr, err := runSplit(t, "import", "cluster",
+		"--cluster-config-file", "testdata/clusters/importable.yaml")
+	require.NoError(t, err)
+	require.NotContains(t, stderr, "Topic filter")
+}
+
+func TestImportClusterRejectsMalformedTopicPattern(t *testing.T) {
+	_, _, err := runSplit(t, "import", "cluster",
+		"--cluster-config-file", "testdata/clusters/importable.yaml",
+		"--topic", "payments.[")
+	require.Error(t, err)
+	var ee *ExitError
+	require.ErrorAs(t, err, &ee)
+	require.Equal(t, 2, ee.Code)
+	require.Contains(t, ee.Msg, "malformed pattern")
+}

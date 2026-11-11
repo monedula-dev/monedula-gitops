@@ -194,13 +194,23 @@ type ImportOutput struct {
 	// QuotasSkipped is true when --skip-quotas was passed, meaning client
 	// quotas were not listed/reconstructed at all. Distinguishes
 	// "intentionally skipped" from "cluster has no quotas".
-	QuotasSkipped bool     `json:"quotasSkipped,omitempty"`
-	Warnings      []string `json:"warnings,omitempty"`
+	QuotasSkipped bool `json:"quotasSkipped,omitempty"`
+	// Filtered is set when --topic/--exclude-topic narrowed the import: the
+	// patterns and what they left out. Nil (omitted) for an unfiltered import.
+	Filtered *FilterSummary `json:"filtered,omitempty"`
+	Warnings []string       `json:"warnings,omitempty"`
 	// RecordNameSubjects holds subjects recognized as RecordName-strategy subjects
 	// (subject name == the schema's record full name). They cannot be attributed to
 	// an owning topic from cluster state alone and are reported for manual
 	// attribution (spec §24.1).
 	RecordNameSubjects []RecordNameSubject `json:"recordNameSubjects,omitempty"`
+}
+
+// FilterSummary reports a topic-filtered import (see TopicFilter).
+type FilterSummary struct {
+	Topics        []string    `json:"topics,omitempty"`
+	ExcludeTopics []string    `json:"excludeTopics,omitempty"`
+	Skipped       FilterStats `json:"skipped"`
 }
 
 // ImportSummary holds the headline counts of an import run.
@@ -287,6 +297,10 @@ func renderSummaryHuman(out ImportOutput) []byte {
 		fmt.Fprintf(&buf, "Users: %d\n", out.Summary.Users)
 	}
 	fmt.Fprintf(&buf, "RecordName subjects: %d\n", out.Summary.RecordNameSubjects)
+	if f := out.Filtered; f != nil {
+		fmt.Fprintf(&buf, "Topic filter: left out %d topics, %d ACLs, %d role bindings, %d schema subjects\n",
+			f.Skipped.Topics, f.Skipped.ACLs, f.Skipped.RoleBindings, f.Skipped.Subjects)
+	}
 	if out.Summary.Partial {
 		buf.WriteString("Partial: true (some ownership was not imported; see warnings)\n")
 	}
