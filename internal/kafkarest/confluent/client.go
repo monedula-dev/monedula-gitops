@@ -157,38 +157,34 @@ func (c *Client) applyAuth(req *http.Request) {
 	}
 }
 
-// httpStatusError is a non-2xx response. Its message carries the status code
-// and a bounded body snippet, never request headers.
-type httpStatusError struct {
-	status int
-	msg    string
-}
-
-func (e *httpStatusError) Error() string { return e.msg }
-
 // statusOf returns the HTTP status carried by err, or 0.
 func statusOf(err error) int {
-	var he *httpStatusError
-	if errors.As(err, &he) {
-		return he.status
+	var se *kafkarest.StatusError
+	if errors.As(err, &se) {
+		return se.Code
 	}
 	return 0
 }
 
+// statusError builds a *kafkarest.StatusError from a non-2xx response. Its
+// message carries the status code and the API message or a bounded body
+// snippet, never request headers.
 func statusError(status int, body []byte) error {
 	var env struct {
-		Message string `json:"message"`
+		ErrorCode int    `json:"error_code"`
+		Message   string `json:"message"`
 	}
-	msg := fmt.Sprintf("kafkarest: returned status %d", status)
+	se := &kafkarest.StatusError{Code: status}
 	if err := json.Unmarshal(body, &env); err == nil && env.Message != "" {
-		msg += ": " + env.Message
+		se.ErrorCode = env.ErrorCode
+		se.Message = env.Message
 	} else if snippet := strings.TrimSpace(string(body)); snippet != "" {
 		if len(snippet) > 200 {
 			snippet = snippet[:200] + "..."
 		}
-		msg += ": " + snippet
+		se.Message = snippet
 	}
-	return &httpStatusError{status: status, msg: msg}
+	return se
 }
 
 // esc URL-escapes a path segment.

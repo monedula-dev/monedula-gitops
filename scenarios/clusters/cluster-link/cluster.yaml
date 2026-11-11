@@ -1,0 +1,15 @@
+# KafkaCluster CR for CLI mode (docker compose) — the destination cluster of
+# the cluster-link profile: single-node cp-server with the embedded Kafka
+# REST v3 API, which the product uses to manage mirror topics on the
+# src-to-dest cluster link.
+#
+# Security model (DEV ONLY): PLAINTEXT Kafka on :29092 and plain HTTP REST on
+# :8090, both without authentication. No environment variables required.
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaCluster
+metadata:
+  name: dest
+spec:
+  bootstrapServers: localhost:29092
+  rest:
+    endpoint: http://localhost:8090/kafka

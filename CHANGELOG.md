@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Samples: `gitops_v1alpha1_kafkamirrortopic.yaml` and `gitops_v1alpha1_kafkacluster_rest.yaml`.
 - `KafkaTopic` `deletionPolicy: Delete` verification is best effort: an out-of-band promote or
   failover racing the final check cannot be excluded, so `Orphan` stays the default.
+- **Tests:** an end-to-end scenario (`26-mirror-topic`) runs `KafkaMirrorTopic` against two real
+  Confluent Server 8.3 clusters joined by a cluster link: `doctor`, create, replication of
+  produced records, a paused mirror caught by `verify`, a mirror over an existing normal topic
+  rejected, and an `import` round-trip. It runs in a new `cp-8.3-link` e2e matrix cell.
 
 ### Changed
 - **Operator, `KafkaTopic` finalizer:** the `gitops.monedula.dev/force-finalizer-removal`
@@ -42,6 +46,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Mirror guard (CLI and operator):** for a live or stopping mirror topic, or one whose mirror
   state is unknown, ACL prune (`DeleteAcl`) on the literal topic resource is now suppressed as
   well as ACL creation. Prefixed and wildcard ACLs are unaffected.
+
+### Fixed
+- **CLI, `KafkaMirrorTopic` apply:** a mirror create that Kafka REST rejects with a 4xx (for
+  example a missing source topic, 404) is reported as `rejected by Kafka REST (<status>)`
+  instead of "outcome unknown, re-run diff before retrying".
+- **CLI, apply output:** a result whose status equals its action (`Rejected`) is printed once
+  (`Rejected KafkaMirrorTopic/...`), not as `Rejected Rejected ...`.
+- **CLI, apply output:** apply results now include the operation's message (for example the
+  reason a mirror operation was rejected: `message=...` in human output, `message` in JSON/YAML),
+  not only for `Rejected` results, and an empty risk is no longer printed as `(risk=)`.
+- **CLI, `import`:** a mirror topic whose only explicitly set configs are synced by its cluster
+  link no longer gets a `MirrorConfigNotImported` warning or makes the import partial.
 
 ## [1.0.0] - 2026-10-09
 
