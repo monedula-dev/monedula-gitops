@@ -25,12 +25,14 @@ type importFlags struct {
 	cluster               string
 	outputDir             string
 	overwrite             string
-	output                string // summary format: human | yaml | json
-	skipSchemas           bool   // when true, skip SR-client construction and schema collection
-	skipUsers             bool   // when true, skip SCRAM credential listing/reconstruction entirely
-	skipQuotas            bool   // when true, skip quota listing/reconstruction entirely
-	includeConnectingUser bool   // when true, do not skip the connecting principal's own credential
-	includeInternal       bool   // when true, import Kafka/Confluent housekeeping topics too
+	output                string   // summary format: human | yaml | json
+	skipSchemas           bool     // when true, skip SR-client construction and schema collection
+	skipUsers             bool     // when true, skip SCRAM credential listing/reconstruction entirely
+	skipQuotas            bool     // when true, skip quota listing/reconstruction entirely
+	includeConnectingUser bool     // when true, do not skip the connecting principal's own credential
+	includeInternal       bool     // when true, import Kafka/Confluent housekeeping topics too
+	topics                []string // --topic globs: import only matching topics
+	excludeTopics         []string // --exclude-topic globs: leave matching topics out
 
 	nsStrategy      string // single | prefix | regex | mapping-file
 	nsSingle        string
@@ -71,6 +73,8 @@ func newImportClusterCmd() *cobra.Command {
 	fl.BoolVar(&f.includeConnectingUser, "include-connecting-user", false, "include the connecting principal's own SCRAM credential (skipped by default to avoid self-lockout risk)")
 	fl.BoolVar(&f.includeInternal, "include-internal", false, "import Kafka/Confluent housekeeping topics too (__*, _schemas, _confluent*); skipped by default")
 
+	fl.StringArrayVar(&f.topics, "topic", nil, "import only topics matching this glob, plus their ACLs, role bindings, schemas and mirrors (repeatable; e.g. 'payments.*')")
+	fl.StringArrayVar(&f.excludeTopics, "exclude-topic", nil, "leave out topics matching this glob, applied after --topic (repeatable)")
 	fl.StringVar(&f.nsStrategy, "namespace-strategy", "single", "namespace strategy: single, prefix, regex, or mapping-file")
 	fl.StringVar(&f.nsSingle, "namespace", "default", "namespace value for the single strategy")
 	fl.StringVar(&f.prefixSeparator, "prefix-separator", ".", "separator for the prefix strategy")
@@ -85,6 +89,11 @@ func runImportCluster(cmd *cobra.Command, f *importFlags) error {
 	// 1. Require at least one cluster config.
 	if len(f.clusterConfigFiles) == 0 {
 		return &ExitError{Code: 2, Msg: "no cluster config provided (use --cluster-config-file)"}
+	}
+
+	topicFilter := importer.TopicFilter{Include: f.topics, Exclude: f.excludeTopics}
+	if err := topicFilter.Validate(); err != nil {
+		return &ExitError{Code: 2, Msg: err.Error()}
 	}
 
 	// 2. Load cluster configs and collect KafkaClusters keyed by name.
@@ -173,7 +182,8 @@ func runImportCluster(cmd *cobra.Command, f *importFlags) error {
 
 	// 5. Read a deterministic snapshot of live state (read-only; never mutates).
 	snap, err := importer.ReadSnapshot(ctx, client, srClient, mdsClient, mdsScopes,
-		importer.SnapshotOptions{SkipUsers: f.skipUsers, SkipQuotas: f.skipQuotas, IncludeInternal: f.includeInternal, REST: restClient})
+		importer.SnapshotOptions{SkipUsers: f.skipUsers, SkipQuotas: f.skipQuotas, IncludeInternal: f.includeInternal,
+			TopicFilter: topicFilter, REST: restClient})
 	if err != nil {
 		return &ExitError{Code: 2, Msg: err.Error()}
 	}
@@ -195,9 +205,9 @@ func runImportCluster(cmd *cobra.Command, f *importFlags) error {
 
 	// 8. Output.
 	if f.outputDir != "" {
-		return writeImportToDir(cmd, res, selected, f)
+		return writeImportToDir(cmd, res, selected, f, snap.Filtered)
 	}
-	return writeImportToStdout(cmd, res, selected, f)
+	return writeImportToStdout(cmd, res, selected, f, snap.Filtered)
 }
 
 // namespaceStrategy builds an importer.NamespaceStrategy from the flags. For the
@@ -235,7 +245,7 @@ func (f *importFlags) namespaceStrategy() (importer.NamespaceStrategy, error) {
 // apply/verify of the piped output would fail on missing files. Refusing beats
 // silently emitting broken manifests (and stripping the schemas would violate
 // the round-trip guarantee).
-func writeImportToStdout(cmd *cobra.Command, res importer.Result, cluster string, f *importFlags) error {
+func writeImportToStdout(cmd *cobra.Command, res importer.Result, cluster string, f *importFlags, filtered importer.FilterStats) error {
 	if n := len(res.SchemaFiles); n > 0 {
 		return &ExitError{Code: 2, Msg: fmt.Sprintf(
 			"import found %d schema subject(s); schema files cannot be emitted to stdout — use --output-dir", n)}
@@ -253,6 +263,7 @@ func writeImportToStdout(cmd *cobra.Command, res importer.Result, cluster string
 	out.SchemasSkipped = f.skipSchemas
 	out.UsersSkipped = f.skipUsers
 	out.QuotasSkipped = f.skipQuotas
+	out.Filtered = filterSummary(f, filtered)
 	summary, err := importer.RenderSummary(out, f.output)
 	if err != nil {
 		return &ExitError{Code: 2, Msg: err.Error()}
@@ -267,7 +278,7 @@ func writeImportToStdout(cmd *cobra.Command, res importer.Result, cluster string
 // summary to stdout in the requested -o format. The human-friendly
 // "Wrote N files, skipped M" line is only appended for the human format, so a
 // yaml/json summary stays a clean, parseable document.
-func writeImportToDir(cmd *cobra.Command, res importer.Result, cluster string, f *importFlags) error {
+func writeImportToDir(cmd *cobra.Command, res importer.Result, cluster string, f *importFlags, filtered importer.FilterStats) error {
 	outcome, err := importer.WriteToDir(res, f.outputDir, f.overwrite)
 	if err != nil {
 		return &ExitError{Code: 2, Msg: err.Error()}
@@ -276,6 +287,7 @@ func writeImportToDir(cmd *cobra.Command, res importer.Result, cluster string, f
 	imp.SchemasSkipped = f.skipSchemas
 	imp.UsersSkipped = f.skipUsers
 	imp.QuotasSkipped = f.skipQuotas
+	imp.Filtered = filterSummary(f, filtered)
 	summary, err := importer.RenderSummary(imp, f.output)
 	if err != nil {
 		return &ExitError{Code: 2, Msg: err.Error()}
@@ -290,4 +302,13 @@ func writeImportToDir(cmd *cobra.Command, res importer.Result, cluster string, f
 		}
 	}
 	return nil
+}
+
+// filterSummary returns the summary's filter section: nil (omitted) unless
+// --topic or --exclude-topic was given, so unfiltered imports render as before.
+func filterSummary(f *importFlags, stats importer.FilterStats) *importer.FilterSummary {
+	if len(f.topics) == 0 && len(f.excludeTopics) == 0 {
+		return nil
+	}
+	return &importer.FilterSummary{Topics: f.topics, ExcludeTopics: f.excludeTopics, Skipped: stats}
 }

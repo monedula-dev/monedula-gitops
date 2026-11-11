@@ -115,6 +115,10 @@ type Snapshot struct {
 	// Sorted by mds.RoleBinding.Key() for determinism (spec §40).
 	RoleBindings []mds.RoleBinding
 
+	// Filtered counts what SnapshotOptions.TopicFilter left out; zero when
+	// the filter is inactive.
+	Filtered FilterStats
+
 	// Mirrors holds destination topics classified as live mirror topics; they
 	// are removed from Topics so no physical topic is imported twice. Sorted by
 	// Name. Empty without SnapshotOptions.REST.
@@ -152,6 +156,11 @@ type SnapshotOptions struct {
 	// these topics are broker/platform-managed, not something a GitOps manifest
 	// should claim ownership of.
 	IncludeInternal bool
+
+	// TopicFilter narrows the import to the selected topics and the access,
+	// schemas and mirrors that belong to them (see TopicFilter, filterACLs,
+	// filterRoleBindings). The zero value imports every topic.
+	TopicFilter TopicFilter
 
 	// REST, when non-nil, is the destination cluster's Kafka REST client:
 	// topics are classified against cluster-link mirror state (see
@@ -217,10 +226,19 @@ func ReadSnapshot(ctx context.Context, kClient kafka.AdminClient, srClient schem
 		return Snapshot{}, fmt.Errorf("list topics: %w", err)
 	}
 
+	var filtered FilterStats
+	// filteredOut holds the live topics the TopicFilter rejected, so their
+	// schema subjects can be told apart from genuinely unowned ones.
+	filteredOut := map[string]bool{}
 	out := make([]TopicSnapshot, 0, len(topics))
 	for _, t := range topics {
 		if !opt.IncludeInternal && isInternalTopic(t.Name) {
 			continue // exclude Kafka/Confluent housekeeping topics by default
+		}
+		if !opt.TopicFilter.Match(t.Name) {
+			filteredOut[t.Name] = true
+			filtered.Topics++
+			continue
 		}
 
 		entries, err := kClient.DescribeTopicConfigs(ctx, t.Name)
@@ -250,7 +268,10 @@ func ReadSnapshot(ctx context.Context, kClient kafka.AdminClient, srClient schem
 
 	var ms mirrorSplit
 	if opt.REST != nil {
-		ms, err = classifyMirrors(ctx, kClient, opt.REST, out, opt.IncludeInternal)
+		skip := func(name string) bool {
+			return (!opt.IncludeInternal && isInternalTopic(name)) || !opt.TopicFilter.Match(name)
+		}
+		ms, err = classifyMirrors(ctx, kClient, opt.REST, out, skip)
 		if err != nil {
 			return Snapshot{}, err
 		}
@@ -260,6 +281,9 @@ func ReadSnapshot(ctx context.Context, kClient kafka.AdminClient, srClient schem
 	acls, err := kClient.ListACLs(ctx)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("list acls: %w", err)
+	}
+	if opt.TopicFilter.Active() {
+		acls, filtered.ACLs = filterACLs(acls, opt.TopicFilter)
 	}
 	sort.Slice(acls, func(i, j int) bool {
 		return aclKey(acls[i]) < aclKey(acls[j])
@@ -312,21 +336,26 @@ func ReadSnapshot(ctx context.Context, kClient kafka.AdminClient, srClient schem
 				}
 			}
 		}
+		if opt.TopicFilter.Active() {
+			rbs, filtered.RoleBindings = filterRoleBindings(rbs, opt.TopicFilter)
+		}
 		sort.Slice(rbs, func(i, j int) bool { return rbs[i].Key() < rbs[j].Key() })
 		snap.RoleBindings = rbs
 	}
 
 	if srClient != nil {
-		sr, err := gatherSchemas(ctx, srClient, out)
+		sr, err := gatherSchemas(ctx, srClient, out, filteredOut)
 		if err != nil {
 			return Snapshot{}, err
 		}
+		filtered.Subjects = sr.Filtered
 		snap.Schemas = sr.Schemas
 		snap.RecordNameSubjects = sr.RecordName
 		snap.SchemaAmbiguities = sr.Ambiguities
 		snap.UnmatchedSubjects = sr.Unmatched
 	}
 
+	snap.Filtered = filtered
 	return snap, nil
 }
 
@@ -349,7 +378,7 @@ type mirrorSplit struct {
 // in stale and skipped. Link
 // configs are read for every link that owns at least one mirror so ACL import
 // can tell whether acl.sync.enable is on.
-func classifyMirrors(ctx context.Context, k kafka.AdminClient, r kafkarest.Client, topics []TopicSnapshot, includeInternal bool) (mirrorSplit, error) {
+func classifyMirrors(ctx context.Context, k kafka.AdminClient, r kafkarest.Client, topics []TopicSnapshot, skip func(name string) bool) (mirrorSplit, error) {
 	listed, err := r.ListMirrors(ctx)
 	if err != nil {
 		return mirrorSplit{}, fmt.Errorf("mirror state Unknown: list mirrors: %w", err)
@@ -377,7 +406,7 @@ func classifyMirrors(ctx context.Context, k kafka.AdminClient, r kafkarest.Clien
 	sort.Strings(mirrorNames)
 	var stale []string
 	for _, n := range mirrorNames {
-		if !includeInternal && isInternalTopic(n) {
+		if skip(n) {
 			continue
 		}
 		if snap.Classify(n) == mirror.Unknown {
@@ -450,12 +479,18 @@ type schemaMatch struct {
 	RecordName  []RecordNameSubject
 	Unmatched   []string
 	Ambiguities []string
+	// Filtered counts subjects skipped because they belong to a topic the
+	// TopicFilter left out.
+	Filtered int
 }
 
 // gatherSchemas classifies every Schema Registry subject against the imported
 // topic list using a four-level strategy cascade (evaluated in order per
 // subject; first match wins):
 //
+//  0. Filtered: the subject's longest "<topic>-" prefix names a live topic
+//     that the TopicFilter left out (filteredOut) → skipped and counted, so a
+//     filtered import does not report other teams' subjects as unmatched.
 //  1. TopicName: subject ∈ {"<topic>-value", "<topic>-key"} for an imported
 //     topic → assign Value/Key and set that slot's strategy to "TopicName".
 //     Exactly matches the legacy behavior so that golden tests remain stable.
@@ -471,7 +506,7 @@ type schemaMatch struct {
 //
 // Results (Unmatched, RecordName, Ambiguities) are sorted for determinism.
 // TopicName key/value behavior is byte-identical to the previous implementation.
-func gatherSchemas(ctx context.Context, srClient schemaregistry.Client, topics []TopicSnapshot) (schemaMatch, error) {
+func gatherSchemas(ctx context.Context, srClient schemaregistry.Client, topics []TopicSnapshot, filteredOut map[string]bool) (schemaMatch, error) {
 	subjects, err := srClient.ListSubjects(ctx)
 	if err != nil {
 		return schemaMatch{}, fmt.Errorf("list subjects: %w", err)
@@ -492,8 +527,27 @@ func gatherSchemas(ctx context.Context, srClient schemaregistry.Client, topics [
 		Schemas: map[string]TopicSchemas{},
 	}
 
+	// owners indexes every live topic, imported or filtered out, so a subject
+	// is attributed to its longest-prefix topic before deciding to skip it.
+	var owners map[string]bool
+	if len(filteredOut) > 0 {
+		owners = make(map[string]bool, len(topics)+len(filteredOut))
+		for _, t := range topics {
+			owners[t.Name] = true
+		}
+		for n := range filteredOut {
+			owners[n] = true
+		}
+	}
+
 	sort.Strings(subjects)
 	for _, subject := range subjects {
+		// ── Step 0: subjects of filtered-out topics ────────────────────────
+		if owners != nil && filteredOut[subjectOwner(subject, owners)] {
+			result.Filtered++
+			continue
+		}
+
 		// ── Step 1: TopicName ──────────────────────────────────────────────
 		if tgt, ok := expectedTopicName[subject]; ok {
 			state, err := srClient.GetSubject(ctx, subject)

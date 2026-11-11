@@ -93,7 +93,7 @@ func TestGatherSchemasMixedStrategyPerSlot(t *testing.T) {
 			}, "")
 
 			topics := []TopicSnapshot{{Name: "orders", Partitions: 1, ReplicationFactor: 1}}
-			result, err := gatherSchemas(ctx, sr, topics)
+			result, err := gatherSchemas(ctx, sr, topics, nil)
 			require.NoError(t, err)
 
 			ts, ok := result.Schemas["orders"]
@@ -145,7 +145,7 @@ func TestBuildMixedStrategyFallsBackToExplicitFiles(t *testing.T) {
 			}, "")
 
 			topics := []TopicSnapshot{{Name: "orders", Partitions: 1, ReplicationFactor: 1}}
-			result, err := gatherSchemas(ctx, sr, topics)
+			result, err := gatherSchemas(ctx, sr, topics, nil)
 			require.NoError(t, err)
 
 			snap := Snapshot{Topics: topics, Schemas: result.Schemas}

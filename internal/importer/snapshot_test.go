@@ -239,7 +239,7 @@ func TestGatherSchemasTopicName(t *testing.T) {
 	seedSubject(t, sr, "orders-value", schemaregistry.Schema{Type: schemaregistry.AVRO, Definition: body}, "BACKWARD")
 
 	topics := []TopicSnapshot{{Name: "orders", Partitions: 1, ReplicationFactor: 1}}
-	result, err := gatherSchemas(ctx, sr, topics)
+	result, err := gatherSchemas(ctx, sr, topics, nil)
 	require.NoError(t, err)
 
 	ts, ok := result.Schemas["orders"]
@@ -266,7 +266,7 @@ func TestGatherSchemasTopicRecordName(t *testing.T) {
 	}, "FULL")
 
 	topics := []TopicSnapshot{{Name: "orders", Partitions: 1, ReplicationFactor: 1}}
-	result, err := gatherSchemas(ctx, sr, topics)
+	result, err := gatherSchemas(ctx, sr, topics, nil)
 	require.NoError(t, err)
 
 	ts, ok := result.Schemas["orders"]
@@ -293,7 +293,7 @@ func TestGatherSchemasRecordName(t *testing.T) {
 	}, "BACKWARD")
 
 	topics := []TopicSnapshot{{Name: "payments", Partitions: 1, ReplicationFactor: 1}}
-	result, err := gatherSchemas(ctx, sr, topics)
+	result, err := gatherSchemas(ctx, sr, topics, nil)
 	require.NoError(t, err)
 
 	require.Empty(t, result.Schemas, "must not be attributed to any topic")
@@ -323,7 +323,7 @@ func TestGatherSchemasTopicNameBeatsTopicRecordName(t *testing.T) {
 	}, "NONE")
 
 	topics := []TopicSnapshot{{Name: "orders", Partitions: 1, ReplicationFactor: 1}}
-	result, err := gatherSchemas(ctx, sr, topics)
+	result, err := gatherSchemas(ctx, sr, topics, nil)
 	require.NoError(t, err)
 
 	ts, ok := result.Schemas["orders"]
@@ -353,7 +353,7 @@ func TestGatherSchemasAmbiguity(t *testing.T) {
 	}, "BACKWARD")
 
 	topics := []TopicSnapshot{{Name: "orders", Partitions: 1, ReplicationFactor: 1}}
-	result, err := gatherSchemas(ctx, sr, topics)
+	result, err := gatherSchemas(ctx, sr, topics, nil)
 	require.NoError(t, err)
 
 	ts, ok := result.Schemas["orders"]
@@ -385,7 +385,7 @@ func TestGatherSchemasGenericUnmatched(t *testing.T) {
 	}, "")
 
 	topics := []TopicSnapshot{{Name: "orders", Partitions: 1, ReplicationFactor: 1}}
-	result, err := gatherSchemas(ctx, sr, topics)
+	result, err := gatherSchemas(ctx, sr, topics, nil)
 	require.NoError(t, err)
 
 	require.Equal(t, []string{"legacy-thing"}, result.Unmatched)
@@ -408,7 +408,7 @@ func TestGatherSchemasExtractError(t *testing.T) {
 	}, "")
 
 	topics := []TopicSnapshot{{Name: "other-topic", Partitions: 1, ReplicationFactor: 1}}
-	result, err := gatherSchemas(ctx, sr, topics)
+	result, err := gatherSchemas(ctx, sr, topics, nil)
 	require.NoError(t, err)
 
 	require.Equal(t, []string{"raw-events-value"}, result.Unmatched,
@@ -444,7 +444,7 @@ func TestGatherSchemasTopicNameOverridesTopicRecordName_SurfacesDisplaced(t *tes
 	}, "NONE")
 
 	topics := []TopicSnapshot{{Name: "orders", Partitions: 1, ReplicationFactor: 1}}
-	result, err := gatherSchemas(ctx, sr, topics)
+	result, err := gatherSchemas(ctx, sr, topics, nil)
 	require.NoError(t, err)
 
 	ts, ok := result.Schemas["orders"]
@@ -481,7 +481,7 @@ func TestGatherSchemasDeterminism(t *testing.T) {
 	seedSubject(t, sr, "unmatched-beta", schemaregistry.Schema{Type: schemaregistry.AVRO, Definition: legacy2}, "")
 
 	topics := []TopicSnapshot{{Name: "payments", Partitions: 1, ReplicationFactor: 1}}
-	result, err := gatherSchemas(ctx, sr, topics)
+	result, err := gatherSchemas(ctx, sr, topics, nil)
 	require.NoError(t, err)
 
 	// RecordName subjects must be sorted by Subject.

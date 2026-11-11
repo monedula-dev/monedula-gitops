@@ -338,3 +338,24 @@ func TestImportMirrorConfigsCountedWhenLinkSyncUnknown(t *testing.T) {
 		`MirrorConfigNotImported: mirror topic "payments.orders" has 2 explicitly set configs; declare reviewed local keys manually`)
 	require.True(t, res.Partial)
 }
+
+// TestImportTopicFilterSkipsMirrors: a mirror outside the topic filter is
+// neither imported nor classified, so even a mirror whose state would make an
+// unfiltered import refuse to guess (unknown status) does not block importing
+// the selected part of the cluster.
+func TestImportTopicFilterSkipsMirrors(t *testing.T) {
+	k, r := mirrorFixture(t, "SOME_FUTURE_STATUS", nil, nil, nil)
+
+	_, err := ReadSnapshot(context.Background(), k, nil, nil, nil,
+		SnapshotOptions{SkipUsers: true, SkipQuotas: true, REST: r})
+	require.Error(t, err, "control: unfiltered import refuses the unknown mirror status")
+
+	snap, err := ReadSnapshot(context.Background(), k, nil, nil, nil,
+		SnapshotOptions{SkipUsers: true, SkipQuotas: true, REST: r,
+			TopicFilter: TopicFilter{Include: []string{"unrelated"}}})
+	require.NoError(t, err)
+	require.Empty(t, snap.Mirrors)
+	require.Len(t, snap.Topics, 1)
+	require.Equal(t, "unrelated", snap.Topics[0].Name)
+	require.Equal(t, 1, snap.Filtered.Topics)
+}

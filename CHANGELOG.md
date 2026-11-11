@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Import a part of a cluster:** `import cluster` takes repeatable `--topic <glob>` and
+  `--exclude-topic <glob>` flags (`path.Match` syntax, as in `spec.tenancy`). Only matching topics
+  are imported, together with the ACLs and MDS role bindings on them, their Schema Registry
+  subjects and their mirror topics. Group, cluster and other non-topic ACLs and role bindings come
+  along only for principals that hold access to a selected topic; prefixed ACLs are kept when the
+  prefix itself matches. Users and quotas are not topic-scoped and are still imported unless
+  `--skip-users` / `--skip-quotas` is given. The summary reports what the filter left out.
 - **KafkaMirrorTopic (CLI):** declarative Confluent mirror topics. `validate`, `diff`, `apply`,
   `verify`, and `import` handle the new `KafkaMirrorTopic` kind (create and alter only; mirrors are
   never deleted or promoted), `KafkaTopic` is guarded against live mirrors, and `doctor` checks
