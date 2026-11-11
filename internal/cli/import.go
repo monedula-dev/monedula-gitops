@@ -25,12 +25,12 @@ type importFlags struct {
 	cluster               string
 	outputDir             string
 	overwrite             string
-	output                string // summary format: human | yaml | json
-	skipSchemas           bool   // when true, skip SR-client construction and schema collection
-	skipUsers             bool   // when true, skip SCRAM credential listing/reconstruction entirely
-	skipQuotas            bool   // when true, skip quota listing/reconstruction entirely
-	includeConnectingUser bool   // when true, do not skip the connecting principal's own credential
-	includeInternal       bool   // when true, import Kafka/Confluent housekeeping topics too
+	output                string   // summary format: human | yaml | json
+	skipSchemas           bool     // when true, skip SR-client construction and schema collection
+	skipUsers             bool     // when true, skip SCRAM credential listing/reconstruction entirely
+	skipQuotas            bool     // when true, skip quota listing/reconstruction entirely
+	includeConnectingUser bool     // when true, do not skip the connecting principal's own credential
+	includeInternal       bool     // when true, import Kafka/Confluent housekeeping topics too
 	topics                []string // --topic globs: import only matching topics
 	excludeTopics         []string // --exclude-topic globs: leave matching topics out
 
