@@ -16,6 +16,7 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/api/v1alpha1"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
 	kafkamock "github.com/monedula-dev/monedula-gitops/internal/kafka/mock"
+	"github.com/monedula-dev/monedula-gitops/internal/kafkarest"
 	"github.com/monedula-dev/monedula-gitops/internal/mds"
 	mdsmock "github.com/monedula-dev/monedula-gitops/internal/mds/mock"
 	"github.com/monedula-dev/monedula-gitops/internal/operator/locking"
@@ -171,6 +172,14 @@ type clusterKeyedFactory struct {
 
 func (f clusterKeyedFactory) For(_ context.Context, c *v1alpha1.KafkaCluster) (kafka.AdminClient, schemaregistry.Client, func(), error) {
 	return f.kafkas[c.Name], nil, func() {}, nil
+}
+
+func (f clusterKeyedFactory) KafkaFor(_ context.Context, c *v1alpha1.KafkaCluster) (kafka.AdminClient, func(), error) {
+	return f.kafkas[c.Name], func() {}, nil
+}
+
+func (f clusterKeyedFactory) RESTFor(context.Context, *v1alpha1.KafkaCluster) (kafkarest.Client, error) {
+	return nil, nil
 }
 
 func (f clusterKeyedFactory) MDSFor(_ context.Context, c *v1alpha1.KafkaCluster) (mds.Client, error) {

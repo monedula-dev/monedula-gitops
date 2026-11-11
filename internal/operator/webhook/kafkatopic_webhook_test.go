@@ -38,6 +38,13 @@ func newFakeClient(t *testing.T, objs ...client.Object) client.Client {
 			}
 			return []string{tp.Spec.ClusterRef.Name}
 		}).
+		WithIndex(&v1alpha1.KafkaMirrorTopic{}, MirrorTopicClusterRefNameIndex, func(obj client.Object) []string {
+			m, ok := obj.(*v1alpha1.KafkaMirrorTopic)
+			if !ok {
+				return nil
+			}
+			return []string{m.Spec.ClusterRef.Name}
+		}).
 		WithObjects(objs...).
 		Build()
 }

@@ -90,7 +90,7 @@ func TestReconcileTopicEnforceCreates(t *testing.T) {
 	k := kafkamock.New(nil, nil)
 	tp := baseTopic("Enforce")
 
-	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error on clean apply: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestReconcileTopicDetectOnlyReportsDrift(t *testing.T) {
 	k := kafkamock.New(live, nil)
 	tp := baseTopic("DetectOnly")
 
-	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("DetectOnly drift is terminal, want nil error, got: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestReconcileTopicObserveOnly(t *testing.T) {
 	k := kafkamock.New(live, nil)
 	tp := baseTopic("ObserveOnly")
 
-	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("ObserveOnly is never a failure, want nil error, got: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestReconcileTopicDestructiveBlockedWithoutAnnotation(t *testing.T) {
 	// Without annotation: blocked.
 	k := kafkamock.New(live, nil)
 	tp := baseTopic("Enforce")
-	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil, nil)
 	// Blocked ops are TERMINAL (need a human approval annotation): nil error.
 	if err != nil {
 		t.Fatalf("blocked op is terminal, want nil error, got: %v", err)
@@ -196,7 +196,7 @@ func TestReconcileTopicDestructiveBlockedWithoutAnnotation(t *testing.T) {
 	k2 := kafkamock.New(live, nil)
 	tp2 := baseTopic("Enforce")
 	tp2.Annotations = map[string]string{"gitops.monedula.dev/allow-destructive": "true"}
-	st2, err2 := ReconcileTopic(context.Background(), tp2, cluster(), k2, nil, stubResolver{}, nil, nil, nil)
+	st2, err2 := ReconcileTopic(context.Background(), tp2, cluster(), k2, nil, stubResolver{}, nil, nil, nil, nil)
 	if err2 != nil {
 		t.Fatalf("approved apply succeeded, want nil error, got: %v", err2)
 	}
@@ -218,7 +218,7 @@ func TestReconcileTopicSchemaResolveFailureSkips(t *testing.T) {
 	}
 
 	st, err := ReconcileTopic(context.Background(), tp, srConfiguredCluster(), k, sr,
-		stubResolver{err: errors.New("file refs unsupported in operator mode")}, nil, nil, nil)
+		stubResolver{err: errors.New("file refs unsupported in operator mode")}, nil, nil, nil, nil)
 	// A schema-resolve failure is a config issue (TERMINAL): nil error.
 	if err != nil {
 		t.Fatalf("schema-resolve failure is terminal, want nil error, got: %v", err)
@@ -253,7 +253,7 @@ func TestReconcileTopicSchemaEnforce(t *testing.T) {
 	}
 	body := `{"type":"record","name":"Order","fields":[]}`
 
-	st, err := ReconcileTopic(context.Background(), tp, srConfiguredCluster(), k, sr, stubResolver{body: body}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, srConfiguredCluster(), k, sr, stubResolver{body: body}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("schema enforce succeeded, want nil error, got: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestReconcileTopicSchemaGovernanceMode(t *testing.T) {
 		// No valueSchema/keySchema body -> governance mode.
 	}
 
-	st, err := ReconcileTopic(context.Background(), tp, srConfiguredCluster(), k, sr, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, srConfiguredCluster(), k, sr, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("governance reconcile, want nil error, got: %v", err)
 	}
@@ -352,7 +352,7 @@ func TestReconcileTopicSchemaFirstSetBelowGlobalGated(t *testing.T) {
 	// Without annotation: the LowerSchemaCompatibility op is Blocked; the
 	// registry is never touched.
 	sr := mkSR()
-	st, err := ReconcileTopic(context.Background(), mkTopic(), srConfiguredCluster(), kafkamock.New(nil, nil), sr, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), mkTopic(), srConfiguredCluster(), kafkamock.New(nil, nil), sr, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("blocked op is terminal, want nil error, got: %v", err)
 	}
@@ -367,7 +367,7 @@ func TestReconcileTopicSchemaFirstSetBelowGlobalGated(t *testing.T) {
 	sr2 := mkSR()
 	tp2 := mkTopic()
 	tp2.Annotations = map[string]string{"gitops.monedula.dev/allow-destructive": "true"}
-	st2, err2 := ReconcileTopic(context.Background(), tp2, srConfiguredCluster(), kafkamock.New(nil, nil), sr2, stubResolver{}, nil, nil, nil)
+	st2, err2 := ReconcileTopic(context.Background(), tp2, srConfiguredCluster(), kafkamock.New(nil, nil), sr2, stubResolver{}, nil, nil, nil, nil)
 	if err2 != nil {
 		t.Fatalf("approved apply, want nil error, got: %v", err2)
 	}
@@ -395,7 +395,7 @@ func TestReconcileTopicSchemaCustomStrategy(t *testing.T) {
 	}
 	body := `{"type":"record","name":"Order","fields":[]}`
 
-	st, err := ReconcileTopic(context.Background(), tp, srConfiguredCluster(), k, sr, stubResolver{body: body}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, srConfiguredCluster(), k, sr, stubResolver{body: body}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("custom-strategy reconcile, want nil error, got: %v", err)
 	}
@@ -419,7 +419,7 @@ func TestReconcileTopicInvalidModeIsValidationFailure(t *testing.T) {
 	k := kafkamock.New(nil, nil)
 	tp := baseTopic("detectOnly") // lowercase: invalid
 
-	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("validation failure is terminal, want nil error, got: %v", err)
 	}
@@ -447,7 +447,7 @@ func TestReconcileTopicInvalidAccessOpIsValidationFailure(t *testing.T) {
 		Producers: []v1alpha1.ProducerAccess{{Principal: "User:svc", Operations: []string{"WRITE"}}},
 	}
 
-	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("validation failure is terminal, want nil error, got: %v", err)
 	}
@@ -612,7 +612,7 @@ func TestReconcileTopicLiveStateError(t *testing.T) {
 	k := &getTopicFailClient{Client: kafkamock.New(nil, nil), err: errors.New("broker unreachable")}
 	tp := baseTopic("Enforce")
 
-	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil, nil)
 
 	if err == nil {
 		t.Fatalf("live-state read failure is transient, want non-nil error")
@@ -646,7 +646,7 @@ func TestReconcileTopicPartialApply(t *testing.T) {
 		},
 	}
 
-	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil, nil)
 
 	if err == nil {
 		t.Fatalf("a Failed apply op is retryable, want non-nil error")
@@ -669,7 +669,7 @@ func TestReconcileTopicDriftFieldsContent(t *testing.T) {
 	k := kafkamock.New(live, nil)
 	tp := baseTopic("DetectOnly")
 
-	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("DetectOnly drift is terminal, want nil error, got: %v", err)
 	}
@@ -704,7 +704,7 @@ func TestReconcileTopicPreservesTransitionTime(t *testing.T) {
 	// First reconcile: clean apply -> Ready True.
 	k1 := kafkamock.New(nil, nil)
 	tp := baseTopic("Enforce")
-	st1, err := ReconcileTopic(context.Background(), tp, cluster(), k1, nil, stubResolver{}, nil, nil, nil)
+	st1, err := ReconcileTopic(context.Background(), tp, cluster(), k1, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("first reconcile: %v", err)
 	}
@@ -719,7 +719,7 @@ func TestReconcileTopicPreservesTransitionTime(t *testing.T) {
 	live := []kafka.TopicState{{Name: "payments.orders", Partitions: 3, Config: map[string]string{"retention.ms": "604800000"}}}
 	k2 := kafkamock.New(live, nil)
 	tp.Status = &st1
-	st2, err := ReconcileTopic(context.Background(), tp, cluster(), k2, nil, stubResolver{}, nil, nil, nil)
+	st2, err := ReconcileTopic(context.Background(), tp, cluster(), k2, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("second reconcile: %v", err)
 	}
@@ -744,7 +744,7 @@ func TestReconcileTopicPreservesTransitionTime(t *testing.T) {
 	seeded := readyTime(st2.Conditions)
 	k3 := &getTopicFailClient{Client: kafkamock.New(nil, nil), err: errors.New("broker unreachable")}
 	tp.Status = &st2
-	st3, _ := ReconcileTopic(context.Background(), tp, cluster(), k3, nil, stubResolver{}, nil, nil, nil)
+	st3, _ := ReconcileTopic(context.Background(), tp, cluster(), k3, nil, stubResolver{}, nil, nil, nil, nil)
 	t3 := readyTime(st3.Conditions)
 	if s, _, _ := condStatus(st3.Conditions, v1alpha1.CondReady); s != metav1.ConditionFalse {
 		t.Fatalf("Ready = %v, want False (live-state error)", s)
@@ -766,7 +766,7 @@ func TestReconcileTopicReplicationFactorBlockedWithoutAnnotation(t *testing.T) {
 	rf := 5
 	tp.Spec.ReplicationFactor = &rf
 
-	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("blocked RF change is terminal, want nil error, got: %v", err)
 	}
@@ -794,7 +794,7 @@ func TestReconcileTopicReplicationFactorUnsupportedTerminal(t *testing.T) {
 	tp.Spec.ReplicationFactor = &rf
 	tp.Annotations = map[string]string{"gitops.monedula.dev/allow-destructive": "true"}
 
-	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Unsupported op is terminal (needs a spec change), want nil error, got: %v", err)
 	}
@@ -821,7 +821,7 @@ func TestReconcileTopicValidationFailedClears(t *testing.T) {
 	tp1.Spec.Access = v1alpha1.TopicAccess{
 		Producers: []v1alpha1.ProducerAccess{{Principal: "User:svc", Operations: []string{"WRITE"}}},
 	}
-	st1, err := ReconcileTopic(context.Background(), tp1, cluster(), k1, nil, stubResolver{}, nil, nil, nil)
+	st1, err := ReconcileTopic(context.Background(), tp1, cluster(), k1, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("first reconcile: %v", err)
 	}
@@ -834,7 +834,7 @@ func TestReconcileTopicValidationFailedClears(t *testing.T) {
 	k2 := kafkamock.New(nil, nil)
 	tp2 := baseTopic("Enforce")
 	tp2.Status = &st1
-	st2, err := ReconcileTopic(context.Background(), tp2, cluster(), k2, nil, stubResolver{}, nil, nil, nil)
+	st2, err := ReconcileTopic(context.Background(), tp2, cluster(), k2, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("second reconcile: %v", err)
 	}
@@ -895,7 +895,7 @@ func TestReconcileTopicSchemaSyncedRemovedWhenSchemaRemoved(t *testing.T) {
 		ValueSchema: &v1alpha1.ValueFrom{ValueFrom: v1alpha1.ValueSource{File: "schema.avsc"}},
 	}
 	body := `{"type":"record","name":"Order","fields":[]}`
-	st1, err := ReconcileTopic(context.Background(), tp1, srConfiguredCluster(), k1, sr, stubResolver{body: body}, nil, nil, nil)
+	st1, err := ReconcileTopic(context.Background(), tp1, srConfiguredCluster(), k1, sr, stubResolver{body: body}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("first reconcile: %v", err)
 	}
@@ -908,7 +908,7 @@ func TestReconcileTopicSchemaSyncedRemovedWhenSchemaRemoved(t *testing.T) {
 		Config: map[string]string{"retention.ms": "604800000"}}}, nil)
 	tp2 := baseTopic("Enforce")
 	tp2.Status = &st1
-	st2, err := ReconcileTopic(context.Background(), tp2, cluster(), k2, nil, stubResolver{}, nil, nil, nil)
+	st2, err := ReconcileTopic(context.Background(), tp2, cluster(), k2, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("second reconcile: %v", err)
 	}
@@ -962,7 +962,7 @@ func TestReconcileTopicSchemaSupersededTerminal(t *testing.T) {
 		ValueSchema: &v1alpha1.ValueFrom{ValueFrom: v1alpha1.ValueSource{File: "schema.avsc"}},
 	}
 
-	st, err := ReconcileTopic(context.Background(), tp, srConfiguredCluster(), k, sr, stubResolver{body: v1}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, srConfiguredCluster(), k, sr, stubResolver{body: v1}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("superseded is terminal: retry error must be nil, got %v", err)
 	}
@@ -1187,7 +1187,7 @@ func TestReconcileTopicHonorsDriftIgnoreFields(t *testing.T) {
 	tp := baseTopic("Enforce")
 	tp.Spec.Drift = &v1alpha1.DriftConfig{IgnoreFields: []string{"config.retention.ms"}}
 
-	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1222,7 +1222,7 @@ func TestReconcileTopicTenancyDeniedNamespace(t *testing.T) {
 		AllowedNamespaces: []string{"team-a"},
 	})
 
-	st, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("tenancy denial is terminal, want nil error, got: %v", err)
 	}
@@ -1257,7 +1257,7 @@ func TestReconcileTopicTenancyDeniedNamespaceIncrementsTerminalCounter(t *testin
 
 	before := operator.ReconcileTerminalCount("kafkatopic", reasonTenancyDenied)
 
-	if _, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, nil, nil); err != nil {
+	if _, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, nil, nil, nil); err != nil {
 		t.Fatalf("tenancy denial is terminal, want nil error, got: %v", err)
 	}
 	after := operator.ReconcileTerminalCount("kafkatopic", reasonTenancyDenied)
@@ -1266,7 +1266,7 @@ func TestReconcileTopicTenancyDeniedNamespaceIncrementsTerminalCounter(t *testin
 	}
 
 	// A second terminal reconcile of the same kind+reason accumulates.
-	if _, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, nil, nil); err != nil {
+	if _, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, nil, nil, nil); err != nil {
 		t.Fatalf("tenancy denial is terminal, want nil error, got: %v", err)
 	}
 	if got := operator.ReconcileTerminalCount("kafkatopic", reasonTenancyDenied); got != before+2 {
@@ -1289,7 +1289,7 @@ func TestReconcileTopicTenancyDeniedPrefix(t *testing.T) {
 		},
 	})
 
-	st, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("tenancy denial is terminal, want nil error, got: %v", err)
 	}
@@ -1326,7 +1326,7 @@ func TestReconcileTopicTenancyAllowed(t *testing.T) {
 		},
 	})
 
-	st, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("tenancy allowed: want nil error, got: %v", err)
 	}
@@ -1549,7 +1549,7 @@ func TestReconcileTopicTenancyDeniedConsumerGroup(t *testing.T) {
 		},
 	})
 
-	st, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("tenancy denial is terminal, want nil error, got: %v", err)
 	}
@@ -1583,7 +1583,7 @@ func TestReconcileTopicTenancyAllowedConsumerGroup(t *testing.T) {
 		},
 	})
 
-	st, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cl, k, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("tenancy allowed: want nil error, got: %v", err)
 	}
@@ -2066,7 +2066,7 @@ func TestReconcileTopicACLConflictConditionTrue(t *testing.T) {
 		},
 	}
 
-	st, err := ReconcileTopic(context.Background(), reconcileTp, cluster(), k, nil, stubResolver{}, view, nil, nil)
+	st, err := ReconcileTopic(context.Background(), reconcileTp, cluster(), k, nil, stubResolver{}, view, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2099,7 +2099,7 @@ func TestReconcileTopicACLConflictConditionFalse(t *testing.T) {
 	view := &ClusterACLView{}
 
 	tp := baseTopic("Enforce")
-	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, view, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, view, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2131,7 +2131,7 @@ func TestReconcileTopicACLConflictConditionNilView(t *testing.T) {
 		},
 	}
 
-	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

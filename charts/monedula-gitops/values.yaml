@@ -13,6 +13,8 @@ logLevel: warn         # error | warn | info | debug
 leaderElection:
   enabled: true
 resyncInterval: ""             # --resync-interval; empty omits the flag (operator default 5m; minimum 30s)
+mirrorStallThreshold: ""       # --mirror-stall-threshold; empty omits the flag (operator default 30m; minimum 1m)
+finalizerVerificationTimeout: "" # --finalizer-verification-timeout; empty omits the flag (operator default 5s; must be >0 and <=5m)
 # --max-concurrent-reconciles; empty omits the flag (operator default 1). Values >1 REQUIRE
 # leaderElection.enabled=true: concurrency relies on the operator's in-process locking, so a
 # second active replica would race it — the chart refuses to render (and the operator refuses

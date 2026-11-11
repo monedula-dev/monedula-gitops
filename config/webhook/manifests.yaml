@@ -35,6 +35,26 @@ webhooks:
     service:
       name: monedula-gitops-webhook-service
       namespace: monedula-system
+      path: /validate-gitops-monedula-dev-v1alpha1-kafkamirrortopic
+  failurePolicy: Fail
+  name: vkafkamirrortopic.gitops.monedula.dev
+  rules:
+  - apiGroups:
+    - gitops.monedula.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - kafkamirrortopics
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: monedula-gitops-webhook-service
+      namespace: monedula-system
       path: /validate-gitops-monedula-dev-v1alpha1-kafkaquota
   failurePolicy: Fail
   name: vkafkaquota.gitops.monedula.dev

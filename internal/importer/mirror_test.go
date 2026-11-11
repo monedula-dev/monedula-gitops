@@ -306,3 +306,35 @@ func TestImportNonStoppedMirrorWithoutTopicStillFails(t *testing.T) {
 		require.Contains(t, err.Error(), "Unknown", status)
 	}
 }
+
+func TestImportMirrorSyncedConfigsNotPartial(t *testing.T) {
+	k, r := mirrorFixture(t, "ACTIVE", map[string]string{"retention.ms": "604800000", "cleanup.policy": "delete"},
+		map[string]string{"acl.sync.enable": "false", "topic.config.sync.include": "retention.ms,cleanup.*"}, nil)
+	res := importWithREST(t, k, r)
+
+	require.Len(t, res.Mirrors, 1)
+	require.False(t, hasWarningPrefix(res.Warnings, "MirrorConfigNotImported"), "%v", res.Warnings)
+	require.False(t, res.Partial)
+}
+
+func TestImportMirrorLocalConfigStillWarned(t *testing.T) {
+	k, r := mirrorFixture(t, "ACTIVE", map[string]string{"retention.ms": "604800000", "min.insync.replicas": "2"},
+		map[string]string{"acl.sync.enable": "false", "topic.config.sync.include": "retention.ms"}, nil)
+	res := importWithREST(t, k, r)
+
+	require.Contains(t, res.Warnings,
+		`MirrorConfigNotImported: mirror topic "payments.orders" has 1 explicitly set configs; declare reviewed local keys manually`)
+	require.True(t, res.Partial)
+}
+
+func TestImportMirrorConfigsCountedWhenLinkSyncUnknown(t *testing.T) {
+	// No link configs at all: link-managed keys cannot be told apart, so every
+	// explicit key is counted and the import is partial.
+	k, r := mirrorFixture(t, "ACTIVE", map[string]string{"retention.ms": "604800000", "cleanup.policy": "delete"}, nil, nil)
+	res := importWithREST(t, k, r)
+
+	require.Len(t, res.Mirrors, 1)
+	require.Contains(t, res.Warnings,
+		`MirrorConfigNotImported: mirror topic "payments.orders" has 2 explicitly set configs; declare reviewed local keys manually`)
+	require.True(t, res.Partial)
+}

@@ -43,6 +43,7 @@ func TestExecutorMirrorStatuses(t *testing.T) {
 		{operations.MirrorTopicUnhealthy, Unsupported, "msg"},
 		{operations.MirrorTopicStopping, Unsupported, "msg"},
 		{operations.MirrorTopicPromoted, Unsupported, "msg"},
+		{operations.MirrorTopicStalled, Unsupported, "msg"},
 		{operations.UnsupportedReplicationFactorChange, Unsupported, "msg"},
 		{operations.StateReadError, Failed, "msg"},
 	}

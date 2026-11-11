@@ -16,6 +16,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `KafkaCluster` sets `spec.rest`, `KafkaTopic` diff/apply/verify read Kafka REST to detect mirror
   topics and fail closed (exit 2) when REST is unavailable. Mirror imports are commonly partial:
   explicitly set mirror configs are not imported (`MirrorConfigNotImported`) and must be reviewed.
+- **KafkaMirrorTopic (operator):** the operator reconciles `KafkaMirrorTopic` resources (create and
+  alter only; deleting the resource always orphans the Kafka topic), with a validating webhook and
+  Kafka REST based status reporting. New operator flags `--mirror-stall-threshold` (default `30m`,
+  minimum `1m`) and `--finalizer-verification-timeout` (default `5s`, must be above 0 and at most
+  `5m`), exposed in the Helm chart as `mirrorStallThreshold` and `finalizerVerificationTimeout`.
+  Samples: `gitops_v1alpha1_kafkamirrortopic.yaml` and `gitops_v1alpha1_kafkacluster_rest.yaml`.
+- `KafkaTopic` `deletionPolicy: Delete` verification is best effort: an out-of-band promote or
+  failover racing the final check cannot be excluded, so `Orphan` stays the default.
+- **Tests:** an end-to-end scenario (`26-mirror-topic`) runs `KafkaMirrorTopic` against two real
+  Confluent Server 8.3 clusters joined by a cluster link: `doctor`, create, replication of
+  produced records, a paused mirror caught by `verify`, a mirror over an existing normal topic
+  rejected, and an `import` round-trip. It runs in a new `cp-8.3-link` e2e matrix cell.
+
+### Changed
+- **Operator, `KafkaTopic` finalizer:** the `gitops.monedula.dev/force-finalizer-removal`
+  annotation now always orphans: the finalizer is removed with no topic, ACL or schema cleanup,
+  even when the cluster is reachable and `gitops.monedula.dev/allow-delete` is set.
+- **Operator, `KafkaTopic` finalizer:** with `deletionPolicy: Delete`, the finalizer orphans (no
+  topic, ACL or schema cleanup) when another `KafkaTopic` or a `KafkaMirrorTopic` still claims the
+  same topic on the same cluster, and emits an `OrphanedToCoClaimant` warning naming it.
+- **Operator, `KafkaTopic` finalizer:** new deletion outcomes, reported as warning events with the
+  finalizer kept: `MirrorDeleteBlocked` (the topic is a live or stopping mirror), `DeleteBlocked`
+  (the co-claimant check or the mirror-state check failed, the Kafka REST client could not be
+  built, or the final mirror verification blocked) and `PartialCleanup` (the final verification blocked after ACLs were already revoked;
+  the event lists completed and blocked stages).
+- **Operator, `KafkaTopic`:** on clusters with `spec.rest`, a Kafka REST outage makes the topic
+  not Ready and nothing is applied (fail closed) instead of reconciling without the mirror guard.
+- **Mirror guard (CLI and operator):** for a live or stopping mirror topic, or one whose mirror
+  state is unknown, ACL prune (`DeleteAcl`) on the literal topic resource is now suppressed as
+  well as ACL creation. Prefixed and wildcard ACLs are unaffected.
+
+### Fixed
+- **CLI, `KafkaMirrorTopic` apply:** a mirror create that Kafka REST rejects with a 4xx (for
+  example a missing source topic, 404) is reported as `rejected by Kafka REST (<status>)`
+  instead of "outcome unknown, re-run diff before retrying".
+- **CLI, apply output:** a result whose status equals its action (`Rejected`) is printed once
+  (`Rejected KafkaMirrorTopic/...`), not as `Rejected Rejected ...`.
+- **CLI, apply output:** apply results now include the operation's message (for example the
+  reason a mirror operation was rejected: `message=...` in human output, `message` in JSON/YAML),
+  not only for `Rejected` results, and an empty risk is no longer printed as `(risk=)`.
+- **CLI, `import`:** a mirror topic whose only explicitly set configs are synced by its cluster
+  link no longer gets a `MirrorConfigNotImported` warning or makes the import partial.
 
 ## [1.0.0] - 2026-10-09
 

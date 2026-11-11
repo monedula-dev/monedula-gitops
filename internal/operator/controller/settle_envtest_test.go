@@ -20,6 +20,7 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/api/v1alpha1"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
 	kafkamock "github.com/monedula-dev/monedula-gitops/internal/kafka/mock"
+	"github.com/monedula-dev/monedula-gitops/internal/kafkarest"
 	"github.com/monedula-dev/monedula-gitops/internal/mds"
 	"github.com/monedula-dev/monedula-gitops/internal/schemaregistry"
 	schemamock "github.com/monedula-dev/monedula-gitops/internal/schemaregistry/mock"
@@ -42,6 +43,15 @@ type delayingFactory struct {
 func (f delayingFactory) For(ctx context.Context, c *v1alpha1.KafkaCluster) (kafka.AdminClient, schemaregistry.Client, func(), error) {
 	time.Sleep(f.delay)
 	return f.inner.For(ctx, c)
+}
+
+func (f delayingFactory) KafkaFor(ctx context.Context, c *v1alpha1.KafkaCluster) (kafka.AdminClient, func(), error) {
+	time.Sleep(f.delay)
+	return f.inner.KafkaFor(ctx, c)
+}
+
+func (f delayingFactory) RESTFor(ctx context.Context, c *v1alpha1.KafkaCluster) (kafkarest.Client, error) {
+	return f.inner.RESTFor(ctx, c)
 }
 
 func (f delayingFactory) MDSFor(ctx context.Context, c *v1alpha1.KafkaCluster) (mds.Client, error) {

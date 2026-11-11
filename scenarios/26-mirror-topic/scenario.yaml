@@ -1,0 +1,5 @@
+title: Mirror topic over a cluster link
+modes: [cli]
+cluster: cluster-link
+summary: Declare a KafkaMirrorTopic on an existing cluster link between two real Confluent Server clusters, watch records replicate, catch a paused mirror with `verify`, reject a mirror whose destination is a normal topic, and round-trip the mirror through `import`.
+requires: [cluster-linking]

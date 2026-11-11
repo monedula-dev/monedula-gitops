@@ -53,6 +53,14 @@ const (
 	envSRSecret       = "MONEDULA_CLOUD_SR_SECRET"          // Schema Registry API secret
 	envServiceAccount = "MONEDULA_CLOUD_SERVICE_ACCOUNT_ID" // e.g. sa-abc123 (ACL subtest)
 
+	// Kafka REST set (mirror topic subtest). All six or none.
+	envRESTEndpoint = "MONEDULA_CLOUD_REST_ENDPOINT"       // Kafka REST endpoint (https://pkc-....confluent.cloud)
+	envRESTKey      = "MONEDULA_CLOUD_REST_KEY"            // Kafka REST API key
+	envRESTSecret   = "MONEDULA_CLOUD_REST_SECRET"         // Kafka REST API secret
+	envClusterID    = "MONEDULA_CLOUD_CLUSTER_ID"          // lkc-... (required on Cloud)
+	envLinkName     = "MONEDULA_CLOUD_LINK_NAME"           // existing cluster link (no prefix)
+	envMirrorSource = "MONEDULA_CLOUD_MIRROR_SOURCE_TOPIC" // existing, not-yet-mirrored source topic
+
 	cloudEnvPrefix = "MONEDULA_CLOUD_"
 )
 
@@ -73,6 +81,39 @@ type cloudEnv struct {
 	srURL          string // "" when SR is not configured
 	serviceAccount string // "" when the ACL subtest should skip
 	hasSR          bool
+
+	// Kafka REST / mirror set; populated only when all six variables are set.
+	hasREST         bool
+	restEndpoint    string
+	clusterID       string
+	linkName        string
+	mirrorSourceTpc string
+}
+
+// restEnvNames is the all-or-none Kafka REST / mirror variable set.
+var restEnvNames = []string{
+	envRESTEndpoint, envRESTKey, envRESTSecret,
+	envClusterID, envLinkName, envMirrorSource,
+}
+
+// restEnvState inspects the REST set through lookup. It returns whether the
+// whole set is present and, for a partial set, the names that are missing.
+func restEnvState(lookup func(string) string) (complete bool, missing []string) {
+	set := 0
+	for _, name := range restEnvNames {
+		if lookup(name) != "" {
+			set++
+		} else {
+			missing = append(missing, name)
+		}
+	}
+	switch set {
+	case 0:
+		return false, nil
+	case len(restEnvNames):
+		return true, nil
+	}
+	return false, missing
 }
 
 // anyCloudEnvSet reports whether any MONEDULA_CLOUD_* variable is set to a
@@ -92,17 +133,19 @@ func anyCloudEnvSet() bool {
 //   - NO MONEDULA_CLOUD_* variables at all -> Skip with guidance;
 //   - some set but the core trio incomplete -> Fatal listing what is missing
 //     (an explicit half-configured run must not silently pass);
-//   - SR trio partially set -> Fatal (same reasoning);
+//   - SR trio or the Kafka REST set partially set -> Fatal (same reasoning);
 //   - otherwise returns the resolved parameters.
 func loadEnv(t *testing.T) cloudEnv {
 	t.Helper()
 	if !anyCloudEnvSet() {
 		t.Skipf("Confluent Cloud validation harness skipped: no %s* environment variables are set.\n"+
 			"Required: %s, %s, %s.\n"+
-			"Optional: %s + %s + %s (Schema Registry subtests), %s (ACL subtest).\n"+
+			"Optional: %s + %s + %s (Schema Registry subtests), %s (ACL subtest),\n"+
+			"%s (Kafka REST + mirror subtest, all-or-none).\n"+
 			"See test/e2e/cloud/README.md for setup instructions.",
 			cloudEnvPrefix, envBootstrap, envAPIKey, envAPISecret,
-			envSRURL, envSRKey, envSRSecret, envServiceAccount)
+			envSRURL, envSRKey, envSRSecret, envServiceAccount,
+			strings.Join(restEnvNames, " + "))
 	}
 
 	var missing []string
@@ -133,11 +176,23 @@ func loadEnv(t *testing.T) cloudEnv {
 			strings.Join(srMissing, ", "), envSRURL, envSRKey, envSRSecret)
 	}
 
+	hasREST, restMissing := restEnvState(os.Getenv)
+	if len(restMissing) > 0 {
+		t.Fatalf("Kafka REST / mirror env is half-configured: missing %s. "+
+			"Set all of %s — or none of them to skip the mirror subtest.",
+			strings.Join(restMissing, ", "), strings.Join(restEnvNames, ", "))
+	}
+
 	return cloudEnv{
-		bootstrap:      os.Getenv(envBootstrap),
-		srURL:          os.Getenv(envSRURL),
-		serviceAccount: os.Getenv(envServiceAccount),
-		hasSR:          srSet == 3,
+		bootstrap:       os.Getenv(envBootstrap),
+		srURL:           os.Getenv(envSRURL),
+		serviceAccount:  os.Getenv(envServiceAccount),
+		hasSR:           srSet == 3,
+		hasREST:         hasREST,
+		restEndpoint:    os.Getenv(envRESTEndpoint),
+		clusterID:       os.Getenv(envClusterID),
+		linkName:        os.Getenv(envLinkName),
+		mirrorSourceTpc: os.Getenv(envMirrorSource),
 	}
 }
 
@@ -197,7 +252,7 @@ func TestCloud(t *testing.T) {
 	// with no cleanup registered). Each subtest instead sets its flag as its
 	// final statement via !st.Failed(): a skip or an early Fatal leaves it
 	// false. These booleans gate later subtests AND drive the verdict table.
-	var doctorOK, topicOK, restrictionOK, driftOK, aclOK, schemaOK, quotaOK, userOK, importOK bool
+	var doctorOK, topicOK, restrictionOK, driftOK, aclOK, schemaOK, quotaOK, userOK, importOK, mirrorOK bool
 	// skipped maps a subtest key to the REASON it was skipped ("" = it ran).
 	// The verdict table prints this actual cause — a dependency failure must
 	// never be reported as "env var not set".
@@ -530,7 +585,70 @@ func TestCloud(t *testing.T) {
 		importOK = !st.Failed()
 	})
 
-	// --- 10. summary -----------------------------------------------------------
+	// --- 10. mirror topic (needs the Kafka REST set) ----------------------------
+	// Smoke test against a PRE-EXISTING cluster link (no prefix) and a
+	// dedicated, not-yet-mirrored source topic on the linked cluster. The
+	// destination topic is named after the source topic (no topicName), so it
+	// does not carry the run prefix; the subtest therefore refuses to run when
+	// the destination already exists, so cleanup can never delete a topic the
+	// test did not create.
+	t.Run("10_mirror", func(st *testing.T) {
+		if !doctorOK {
+			skipped["mirror"] = "dependency failed: doctor"
+			st.Skip("skipped: doctor failed")
+		}
+		if !env.hasREST {
+			skipped["mirror"] = "Kafka REST env (" + envRESTEndpoint + " et al.) not set"
+			st.Skipf("%s not set — mirror subtest skipped", strings.Join(restEnvNames, "/"))
+		}
+		dest := env.mirrorSourceTpc // no topicName -> destination == source name
+		pctx, pcancel := adminCtx()
+		existing, err := admin.GetTopic(pctx, dest)
+		pcancel()
+		if err != nil {
+			st.Fatalf("precondition: looking up destination topic %s: %v", dest, err)
+		}
+		if existing != nil {
+			st.Fatalf("precondition: topic %s already exists on the destination cluster; the smoke test needs a source topic that is not yet mirrored (cleanup would otherwise delete a topic it did not create)", dest)
+		}
+
+		dout, dcode := runCLI(st, "doctor", "-c", cfgPath)
+		noPanic(st, dout)
+		if dcode != 0 {
+			st.Fatalf("verdict: doctor with REST configured FAILED (exit %d)", dcode)
+		}
+		if !strings.Contains(dout, "link:"+env.linkName) {
+			st.Fatalf("verdict: doctor output does not list cluster link %q", env.linkName)
+		}
+
+		mirrorDir := writeManifestDir(st, workDir, "mirror", map[string]string{
+			"mirror.yaml": mirrorTopicYAML(runPrefix+"-mirror", env.linkName, env.mirrorSourceTpc),
+		})
+		// Cleanup runs inside the subtest (deferred) so its outcome is known
+		// when the summary is rendered; it is registered before apply because
+		// the mirror may exist even when apply reports a failure.
+		defer func() {
+			note, failed := deleteMirrorDestination(st, env, admin, dest)
+			notes["mirror"] = note
+			if failed {
+				st.Errorf("%s", note)
+			}
+		}()
+		out, code := runCLI(st, "apply", "-f", mirrorDir, "-c", cfgPath)
+		noPanic(st, out)
+		if code != 0 {
+			st.Fatalf("verdict: mirror apply FAILED (exit %d)", code)
+		}
+		vout, vcode := runCLI(st, "verify", "-f", mirrorDir, "-c", cfgPath)
+		noPanic(st, vout)
+		if vcode != 0 {
+			st.Fatalf("verdict: mirror verify FAILED (exit %d)", vcode)
+		}
+		st.Logf("verdict: mirror topic %s created over link %s and verified", dest, env.linkName)
+		mirrorOK = !st.Failed()
+	})
+
+	// --- 11. summary -----------------------------------------------------------
 	// Rows derive ONLY from the explicit outcome booleans and skip reasons —
 	// never from t.Run return values — so a subtest that never ran can never
 	// be reported OK.
@@ -543,6 +661,7 @@ func TestCloud(t *testing.T) {
 		negativeRow("Quotas", quotaOK, skipped["quota"], notes["quota"]),
 		negativeRow("Users", userOK, skipped["user"], notes["user"]),
 		verdictRow("Import", importOK, skipped["import"], notes["import"]),
+		mirrorRow(skipped["mirror"], mirrorOK, notes["mirror"]),
 	}))
 }
 

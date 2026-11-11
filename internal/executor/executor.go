@@ -237,14 +237,15 @@ func applyOne(ctx context.Context, c Clients, op operations.Operation, ap Approv
 
 	// Mirror findings are never executed. Progressing is informational (the
 	// mirror is converging on its own) and does not fail the run. Unhealthy,
-	// stopping, promoted and replication-factor findings are terminal
+	// stopping, promoted, stalled and replication-factor findings are terminal
 	// divergence only a spec or out-of-band change resolves: Unsupported.
 	// StateReadError is a transient read failure: Failed.
 	switch op.Action {
 	case operations.MirrorTopicProgressing:
 		return OpResult{Op: op, Status: ReportOnly}
 	case operations.MirrorTopicUnhealthy, operations.MirrorTopicStopping,
-		operations.MirrorTopicPromoted, operations.UnsupportedReplicationFactorChange:
+		operations.MirrorTopicPromoted, operations.MirrorTopicStalled,
+		operations.UnsupportedReplicationFactorChange:
 		return OpResult{Op: op, Status: Unsupported, Err: op.Message}
 	case operations.StateReadError:
 		return OpResult{Op: op, Status: Failed, Err: op.Message}

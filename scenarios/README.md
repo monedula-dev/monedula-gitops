@@ -33,6 +33,7 @@ human-readable README and the machine-checked e2e test.
 | `23-schema-import-round-trip` | cli | shared-sasl | `import` reconstructs schema subjects (subject, body, compatibility) drift-free: apply an inline AVRO schema, import with schemas, verify-clean |
 | `24-doctor-preflight` | cli | shared-sasl | `doctor` runs read-only connectivity/readiness probes (config, kafka-connect/admin, acl-read, schema-registry); a healthy cluster exits 0 |
 | `25-kafka-user` | cli, k8s | shared-sasl | A KafkaUser provisions a SCRAM credential; a KafkaTopic's `access` block grants that principal Write — the full credential+ACL onboarding story |
+| `26-mirror-topic` | cli | cluster-link | A KafkaMirrorTopic on a real cluster link: create, replicate records, `verify` catches a paused mirror, a mirror over a normal topic is rejected, and `import` round-trips it |
 
 ## Scenario convention
 
@@ -97,8 +98,10 @@ Cluster profiles live in `scenarios/clusters/`. Each profile directory contains 
 `cluster.yaml` with broker address, protocol, and credentials for a specific test
 cluster: `shared-sasl` (SASL_PLAINTEXT/SCRAM, the default), `auth-sasl-ssl`
 (SCRAM-over-TLS, with dev certs), `auth-mtls` (mutual-TLS client-cert auth), and
-`auth-oauth` (SASL_PLAINTEXT/OAUTHBEARER validated against a mock OIDC server), and
-`auth-mds` (cp-server + LDAP + the Metadata Service for RBAC role bindings).
+`auth-oauth` (SASL_PLAINTEXT/OAUTHBEARER validated against a mock OIDC server),
+`auth-mds` (cp-server + LDAP + the Metadata Service for RBAC role bindings), and
+`cluster-link` (two cp-server clusters joined by a cluster link, managed through the
+destination's embedded Kafka REST API, for mirror topics).
 
 ## Catalog growth
 

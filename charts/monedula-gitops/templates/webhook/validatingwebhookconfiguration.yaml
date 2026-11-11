@@ -125,4 +125,27 @@ webhooks:
     - UPDATE
     resources:
     - kafkausers
+- name: vkafkamirrortopic.gitops.monedula.dev
+  admissionReviewVersions:
+  - v1
+  sideEffects: None
+  failurePolicy: {{ .Values.webhook.failurePolicy }}
+  clientConfig:
+    service:
+      name: {{ include "monedula-gitops.fullname" . }}-webhook
+      namespace: {{ .Release.Namespace }}
+      path: /validate-gitops-monedula-dev-v1alpha1-kafkamirrortopic
+    {{- if not .Values.webhook.certManager.enabled }}
+    caBundle: {{ required "webhook.caBundle is required when webhook.certManager.enabled=false" .Values.webhook.caBundle | quote }}
+    {{- end }}
+  rules:
+  - apiGroups:
+    - gitops.monedula.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - kafkamirrortopics
 {{- end }}

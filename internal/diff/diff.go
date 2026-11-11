@@ -369,12 +369,14 @@ func filterTopicOps(ops []operations.Operation, guards map[string]operations.Ope
 	return out
 }
 
-// filterACLOps drops CreateAcl ops on the literal topic resource of a guarded
-// topic. Prefixed/wildcard patterns and other resource types are policy and kept.
+// filterACLOps drops CreateAcl and DeleteAcl (prune) ops on the literal topic
+// resource of a guarded topic, so neither a grant nor a prune touches a mirror
+// topic or a topic whose mirror state is unknown. Prefixed/wildcard patterns and
+// other resource types are policy and kept.
 func filterACLOps(ops []operations.Operation, guards map[string]operations.Operation) []operations.Operation {
 	var out []operations.Operation
 	for _, op := range ops {
-		if op.Action == operations.CreateAcl && op.ACL != nil &&
+		if (op.Action == operations.CreateAcl || op.Action == operations.DeleteAcl) && op.ACL != nil &&
 			op.ACL.ResourceType == "topic" && op.ACL.PatternType == "literal" {
 			if _, g := guards[op.ACL.ResourceName]; g {
 				continue

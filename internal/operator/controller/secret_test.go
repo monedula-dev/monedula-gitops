@@ -173,3 +173,28 @@ func TestClusterSecretNames(t *testing.T) {
 		})
 	}
 }
+
+func TestClusterSecretNamesIncludesREST(t *testing.T) {
+	c := &v1alpha1.KafkaCluster{Spec: v1alpha1.KafkaClusterSpec{
+		REST: &v1alpha1.KafkaRESTConfig{
+			Endpoint: "https://rest",
+			Auth: &v1alpha1.MDSAuth{
+				Type:     "basic",
+				Username: vfSecret("rest-u"),
+				Password: vfSecret("rest-p"),
+				Token:    vfSecret("rest-t"),
+			},
+			TLS: &v1alpha1.TLSConfig{
+				CACert:     vfSecret("rest-ca"),
+				ClientCert: vfSecret("rest-cc"),
+				ClientKey:  vfSecret("rest-ck"),
+			},
+		},
+	}}
+	got := clusterSecretNames(c)
+	sort.Strings(got)
+	want := []string{"rest-ca", "rest-cc", "rest-ck", "rest-p", "rest-t", "rest-u"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}

@@ -1,0 +1,21 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaMirrorTopic
+metadata:
+  name: sample-mirror-topic
+  namespace: monedula-system
+spec:
+  clusterRef:
+    name: sample-cluster-rest
+  # Existing cluster link on the destination cluster.
+  linkName: dr-link
+  # Topic on the source cluster; the destination topic has the same name unless
+  # topicName is set.
+  sourceTopicName: orders.events
+  # topicName: orders.events.mirror
+  # replicationFactor: 3
+  config:
+    retention.ms: "604800000"
+  reconciliation:
+    mode: Enforce
+  # Deleting this resource never deletes the mirror topic.
+  deletionPolicy: Orphan

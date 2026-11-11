@@ -1,0 +1,12 @@
+apiVersion: gitops.monedula.dev/v1alpha1
+kind: KafkaMirrorTopic
+metadata:
+  name: orders-mirror
+spec:
+  clusterRef:
+    name: dest
+  # Created by the profile's link-setup service on the destination cluster.
+  linkName: src-to-dest
+  # Topic on the source cluster; the link has no prefix, so the mirror is
+  # also named orders on the destination.
+  sourceTopicName: orders

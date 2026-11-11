@@ -256,14 +256,49 @@ func TestPolicyDelete_SharedACLProtectedByLiveTopic(t *testing.T) {
 	}
 }
 
-// listFailClient wraps a client and fails every KafkaTopicList List call,
-// simulating a transient cache/list failure during the view build.
+// TestTopicDelete_CoClaimantFullOrphanSkipsShield: when another live CR
+// claims the same topic (here a KafkaMirrorTopic), the finalizer fully
+// orphans — stricter than the ACL shield: not even the topic's own non-shared
+// group ACL is revoked, and the topic is not deleted.
+func TestTopicDelete_CoClaimantFullOrphanSkipsShield(t *testing.T) {
+	s := topicScheme(t)
+	tp := coOwnedTopic()
+	tp.Spec.DeletionPolicy = "Delete"
+	tp.Finalizers = []string{FinalizerName}
+	tp.Annotations = map[string]string{"gitops.monedula.dev/allow-delete": "true"}
+	pol := policyObj("Enforce")
+	cl := newViewFakeClient(t, s, tp, pol, topicCluster(), finalizerMirrorClaimant())
+	if err := cl.Delete(context.Background(), tp); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	k := kafkamock.New(seededTopics("payments.orders"), coOwnedLiveACLs())
+	r := &KafkaTopicReconciler{Client: cl, Scheme: s, Clients: stubFactory{k: k}}
+	if _, err := r.Reconcile(context.Background(), topicReq()); err != nil {
+		t.Fatalf("Reconcile delete: %v", err)
+	}
+	if calls := k.Calls(); len(calls) != 0 {
+		t.Fatalf("full orphan must not touch the broker, calls %v", calls)
+	}
+	if !liveGroupACLPresent(t, k) {
+		t.Fatal("full orphan must keep even the topic's own group ACL")
+	}
+	var gone v1alpha1.KafkaTopic
+	if err := cl.Get(context.Background(), topicReq().NamespacedName, &gone); err == nil {
+		t.Fatalf("topic CR still present after full orphan: finalizers %v", gone.Finalizers)
+	}
+}
+
+// listFailClient wraps a client and fails every KafkaAccessPolicyList List
+// call, simulating a transient cache/list failure during the view build. The
+// finalizer's co-claimant scan lists only KafkaTopics and KafkaMirrorTopics,
+// so it succeeds and the failure lands in the view build itself.
 type listFailClient struct {
 	client.Client
 }
 
 func (c *listFailClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
-	if _, ok := list.(*v1alpha1.KafkaTopicList); ok {
+	if _, ok := list.(*v1alpha1.KafkaAccessPolicyList); ok {
 		return errReason("simulated list failure")
 	}
 	return c.Client.List(ctx, list, opts...)

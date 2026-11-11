@@ -189,3 +189,42 @@ func TestTopicGuardUnknownOnCompleteSnapshotNamesCause(t *testing.T) {
 		})
 	}
 }
+
+// A guarded topic's literal topic ACLs are not pruned either: a live in-scope
+// ACL no longer desired would otherwise produce DeleteAcl on the mirror topic.
+func TestTopicGuardSuppressesPruneOnGuardedTopic(t *testing.T) {
+	snap := mirror.NewSnapshot("c1", "c1",
+		map[string]kafka.TopicState{"orders": {Name: "orders", Partitions: 3}},
+		liveMirror(mtLink, "orders", "orders", "ACTIVE"), activeLink(nil))
+	d := guardDesired()
+	for i := range d.ACLs {
+		d.ACLs[i].Prune = true
+	}
+	d.Scope = access.BuildScope(d.ACLs)
+	live := guardLive(&snap)
+	stale := func(resource string) access.ACL {
+		return access.ACL{Principal: "User:a", Host: "*", ResourceType: "topic", ResourceName: resource,
+			PatternType: "literal", Operation: "Write", Permission: "Allow"}
+	}
+	live.ACLs = []access.ACL{stale("orders"), stale("plain")}
+
+	// Control: without the guard both stale ACLs are prune candidates.
+	unguardedLive := guardLive(nil)
+	unguardedLive.ACLs = live.ACLs
+	var control []string
+	for _, op := range Compute(d, unguardedLive) {
+		if op.Action == operations.DeleteAcl {
+			control = append(control, op.ACL.ResourceName)
+		}
+	}
+	require.Equal(t, []string{"orders", "plain"}, control)
+
+	ops := Compute(d, live)
+	var deleted []string
+	for _, op := range ops {
+		if op.Action == operations.DeleteAcl {
+			deleted = append(deleted, op.ACL.ResourceName)
+		}
+	}
+	require.Equal(t, []string{"plain"}, deleted, "guarded literal topic ACL must not be pruned")
+}

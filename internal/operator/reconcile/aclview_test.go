@@ -70,7 +70,7 @@ func overlapView(t *testing.T, tp *v1alpha1.KafkaTopic, pol *v1alpha1.KafkaAcces
 func TestReconcileTopicPerCRScopePrunesOverlappingOwner(t *testing.T) {
 	tp, _, k := overlapFixture(true, true)
 
-	if _, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil); err != nil {
+	if _, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil, nil); err != nil {
 		t.Fatalf("ReconcileTopic: %v", err)
 	}
 	if got := liveOps(t, k); got["Read"] {
@@ -85,7 +85,7 @@ func TestReconcileTopicAggregatedViewKeepsOtherOwnersACLs(t *testing.T) {
 	tp, pol, k := overlapFixture(true, true)
 	view := overlapView(t, tp.DeepCopy(), pol.DeepCopy())
 
-	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, view, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, view, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("ReconcileTopic: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestReconcileTopicAggregatedViewStillPrunesUndesired(t *testing.T) {
 	})
 	view := overlapView(t, tp.DeepCopy(), pol.DeepCopy())
 
-	if _, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, view, nil, nil); err != nil {
+	if _, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, view, nil, nil, nil); err != nil {
 		t.Fatalf("ReconcileTopic: %v", err)
 	}
 	got := liveOps(t, k)
@@ -136,7 +136,7 @@ func TestReconcileTopicAggregatedViewVeto(t *testing.T) {
 	})
 	view := overlapView(t, tp.DeepCopy(), pol.DeepCopy())
 
-	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, view, nil, nil)
+	st, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, view, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("vetoed prune must not be a retryable failure: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestReconcilePolicyAggregatedViewKeepsOtherOwnersACLs(t *testing.T) {
 func TestReconcileTopicNilViewMatchesPerCRBehavior(t *testing.T) {
 	tp, k := pruneTopicFixture(true)
 
-	if _, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil); err != nil {
+	if _, err := ReconcileTopic(context.Background(), tp, cluster(), k, nil, stubResolver{}, nil, nil, nil, nil); err != nil {
 		t.Fatalf("ReconcileTopic: %v", err)
 	}
 	if !callsContain(k.Calls(), "DeleteACLs") {

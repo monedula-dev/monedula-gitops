@@ -220,8 +220,10 @@ func TestQuorumRecheck_TopicLoserPathRivalGoneAtQuorum(t *testing.T) {
 	if _, err := r.Reconcile(context.Background(), reqFor("ns1", "orders-new")); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
-	if got := quorum.count(); got != 1 {
-		t.Fatalf("loser path performed %d APIReader List(s), want exactly 1", got)
+	// One quorum recheck = one List per topic-claiming kind (KafkaTopic and
+	// KafkaMirrorTopic share the identity; see topicclaim.go).
+	if got := quorum.count(); got != 2 {
+		t.Fatalf("loser path performed %d APIReader List(s), want exactly 2 (one recheck)", got)
 	}
 	if !callsContain(k.Calls(), "CreateTopic dup.orders") {
 		t.Fatalf("quorum said the rival is gone; the topic must be created, kafka calls = %v", k.Calls())

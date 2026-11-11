@@ -48,9 +48,8 @@ type Snapshot struct {
 // identity rules as ReadSnapshot's success path. Nil maps become empty.
 func NewSnapshot(adminClusterID, restClusterID string, topics map[string]kafka.TopicState, mirrors map[string]kafkarest.Mirror, links map[string]LinkInfo) Snapshot {
 	s := Snapshot{AdminClusterID: adminClusterID, RESTClusterID: restClusterID}
-	if adminClusterID == "" || restClusterID == "" || adminClusterID != restClusterID {
-		s.Err = fmt.Errorf("%w: kafka admin cluster id %q, rest cluster id %q",
-			ErrClusterIdentityMismatch, adminClusterID, restClusterID)
+	if err := bindClusterIDs(adminClusterID, nil, restClusterID, nil); err != nil {
+		s.Err = err
 		return s
 	}
 	if topics == nil {
@@ -77,9 +76,8 @@ func ReadSnapshot(ctx context.Context, k kafka.AdminClient, r kafkarest.Client, 
 	aid, aerr := k.ClusterID(ctx)
 	rid, rerr := r.ClusterID(ctx)
 	s.AdminClusterID, s.RESTClusterID = aid, rid
-	if aerr != nil || rerr != nil || aid == "" || rid == "" || aid != rid {
-		s.Err = fmt.Errorf("%w: kafka admin cluster id %q (err: %v), rest cluster id %q (err: %v)",
-			ErrClusterIdentityMismatch, aid, aerr, rid, rerr)
+	if err := bindClusterIDs(aid, aerr, rid, rerr); err != nil {
+		s.Err = err
 		return s
 	}
 	topics, err := k.ListTopics(ctx)
@@ -101,13 +99,10 @@ func ReadSnapshot(ctx context.Context, k kafka.AdminClient, r kafkarest.Client, 
 	for _, t := range topics {
 		tm[t.Name] = t
 	}
-	mm := make(map[string]kafkarest.Mirror, len(mirrors))
-	for _, m := range mirrors {
-		if _, dup := mm[m.MirrorTopicName]; dup {
-			s.Err = fmt.Errorf("duplicate mirror topic name %q in REST response", m.MirrorTopicName)
-			return s
-		}
-		mm[m.MirrorTopicName] = m
+	mm, err := indexMirrors(mirrors)
+	if err != nil {
+		s.Err = err
+		return s
 	}
 	byName := make(map[string]kafkarest.Link, len(links))
 	for _, l := range links {
@@ -127,6 +122,39 @@ func ReadSnapshot(ctx context.Context, k kafka.AdminClient, r kafkarest.Client, 
 		lm[n] = LinkInfo{Link: l, Configs: cfg, ConfigErr: cerr}
 	}
 	return NewSnapshot(aid, rid, tm, mm, lm)
+}
+
+// bindClusterIDs is the single cluster-identity binding rule: both IDs read
+// without error, non-empty and equal. Otherwise it returns an error wrapping
+// ErrClusterIdentityMismatch.
+func bindClusterIDs(adminID string, adminErr error, restID string, restErr error) error {
+	if adminErr == nil && restErr == nil && adminID != "" && restID != "" && adminID == restID {
+		return nil
+	}
+	return fmt.Errorf("%w: kafka admin cluster id %q%s, rest cluster id %q%s",
+		ErrClusterIdentityMismatch, adminID, errSuffix(adminErr), restID, errSuffix(restErr))
+}
+
+// errSuffix renders a read error for the binding message, or nothing when the
+// read succeeded.
+func errSuffix(err error) string {
+	if err == nil {
+		return ""
+	}
+	return fmt.Sprintf(" (err: %v)", err)
+}
+
+// indexMirrors keys a complete ListMirrors result by mirror topic name. A
+// duplicate name is contradictory evidence and fails the whole read.
+func indexMirrors(mirrors []kafkarest.Mirror) (map[string]kafkarest.Mirror, error) {
+	mm := make(map[string]kafkarest.Mirror, len(mirrors))
+	for _, m := range mirrors {
+		if _, dup := mm[m.MirrorTopicName]; dup {
+			return nil, fmt.Errorf("duplicate mirror topic name %q in REST response", m.MirrorTopicName)
+		}
+		mm[m.MirrorTopicName] = m
+	}
+	return mm, nil
 }
 
 // Classify returns the ownership class of a destination topic name.

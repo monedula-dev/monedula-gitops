@@ -17,6 +17,7 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/api/v1alpha1"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
 	kafkamock "github.com/monedula-dev/monedula-gitops/internal/kafka/mock"
+	"github.com/monedula-dev/monedula-gitops/internal/kafkarest"
 	"github.com/monedula-dev/monedula-gitops/internal/mds"
 	"github.com/monedula-dev/monedula-gitops/internal/schemaregistry"
 )
@@ -29,19 +30,35 @@ var (
 )
 
 type stubFactory struct {
-	k      kafka.AdminClient
-	sr     schemaregistry.Client
-	mds    mds.Client
-	err    error
-	mdsErr error
+	k       kafka.AdminClient
+	sr      schemaregistry.Client
+	mds     mds.Client
+	err     error
+	mdsErr  error
+	rest    kafkarest.Client
+	restErr error
+	// srErr fails For only (a Schema Registry build failure); KafkaFor,
+	// which never builds the registry client, is unaffected.
+	srErr error
 }
 
 func (f stubFactory) For(context.Context, *v1alpha1.KafkaCluster) (kafka.AdminClient, schemaregistry.Client, func(), error) {
+	if f.err == nil && f.srErr != nil {
+		return nil, nil, func() {}, f.srErr
+	}
 	return f.k, f.sr, func() {}, f.err
+}
+
+func (f stubFactory) KafkaFor(context.Context, *v1alpha1.KafkaCluster) (kafka.AdminClient, func(), error) {
+	return f.k, func() {}, f.err
 }
 
 func (f stubFactory) MDSFor(context.Context, *v1alpha1.KafkaCluster) (mds.Client, error) {
 	return f.mds, f.mdsErr
+}
+
+func (f stubFactory) RESTFor(context.Context, *v1alpha1.KafkaCluster) (kafkarest.Client, error) {
+	return f.rest, f.restErr
 }
 
 func newScheme(t *testing.T) *runtime.Scheme {

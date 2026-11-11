@@ -43,6 +43,9 @@ type MirrorSnapshot struct {
 // the parsed acl.sync.enable value; nil when absent or unreadable (unknown).
 type MirrorLinkInfo struct {
 	ACLSync *bool
+	// Configs are the link configs when readable (nil otherwise), used to tell
+	// link-synced topic configs from local ones.
+	Configs map[string]string
 }
 
 // TopicSchemas holds the value and/or key subject state matched to a topic via
@@ -419,6 +422,7 @@ func classifyMirrors(ctx context.Context, k kafka.AdminClient, r kafkarest.Clien
 		var info MirrorLinkInfo
 		if li, ok := snap.Links[n]; ok && li.ConfigErr == nil {
 			info.ACLSync = parseBoolConfig(li.Configs["acl.sync.enable"])
+			info.Configs = li.Configs
 		}
 		out.links[n] = info
 	}

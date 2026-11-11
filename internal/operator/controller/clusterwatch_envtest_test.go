@@ -49,6 +49,7 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/api/v1alpha1"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
 	kafkamock "github.com/monedula-dev/monedula-gitops/internal/kafka/mock"
+	"github.com/monedula-dev/monedula-gitops/internal/kafkarest"
 	"github.com/monedula-dev/monedula-gitops/internal/mds"
 	mdsmock "github.com/monedula-dev/monedula-gitops/internal/mds/mock"
 	operatorwebhook "github.com/monedula-dev/monedula-gitops/internal/operator/webhook"
@@ -69,6 +70,14 @@ type mdsGatedFactory struct {
 
 func (f mdsGatedFactory) For(context.Context, *v1alpha1.KafkaCluster) (kafka.AdminClient, schemaregistry.Client, func(), error) {
 	return f.k, f.sr, func() {}, nil
+}
+
+func (f mdsGatedFactory) KafkaFor(context.Context, *v1alpha1.KafkaCluster) (kafka.AdminClient, func(), error) {
+	return f.k, func() {}, nil
+}
+
+func (f mdsGatedFactory) RESTFor(context.Context, *v1alpha1.KafkaCluster) (kafkarest.Client, error) {
+	return nil, nil
 }
 
 func (f mdsGatedFactory) MDSFor(_ context.Context, c *v1alpha1.KafkaCluster) (mds.Client, error) {
