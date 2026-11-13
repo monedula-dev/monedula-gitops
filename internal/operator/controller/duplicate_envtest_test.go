@@ -276,7 +276,7 @@ func TestEnvtestUserDuplicateLoserDeletionOrphansCredential(t *testing.T) {
 		t.Fatalf("create cluster: %v", err)
 	}
 	pw := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "dup-user-pw", Namespace: testNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: "dup-user-pw", Namespace: testNamespace, Labels: map[string]string{CredentialSourceLabel: CredentialSourceLabelValue}},
 		Data:       map[string][]byte{"password": []byte("pw")},
 	}
 	if err := env.cl.Create(ctx, pw); err != nil {

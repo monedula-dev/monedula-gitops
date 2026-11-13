@@ -16,7 +16,7 @@
 # SCRAM bootstrap step.
 services:
   kafka:
-    image: ${MONEDULA_KAFKA_IMAGE:-apache/kafka:4.3.1}
+    image: ${MONEDULA_KAFKA_IMAGE:-apache/kafka:4.4.0}
     healthcheck:
       test: ["CMD", "/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "kafka:9094"]
       interval: 10s

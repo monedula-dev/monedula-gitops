@@ -226,6 +226,7 @@ func deleteSetup(t *testing.T, deletionPolicy string, annotations map[string]str
 	tp := topicObj("Enforce")
 	tp.Spec.DeletionPolicy = deletionPolicy
 	tp.Finalizers = []string{FinalizerName}
+	markReconciled(tp)
 	if annotations != nil {
 		tp.Annotations = annotations
 	}
@@ -269,6 +270,7 @@ func TestTopicReconcile_DeleteDefaultedTopicName(t *testing.T) {
 	tp.Spec.TopicName = "" // rely on the metadata-name default: "orders"
 	tp.Spec.DeletionPolicy = "Delete"
 	tp.Finalizers = []string{FinalizerName}
+	markReconciled(tp)
 	tp.Annotations = map[string]string{"gitops.monedula.dev/allow-delete": "true"}
 	c := topicCluster()
 	cl := newTopicFakeClient(t, s, tp, c)
@@ -343,6 +345,7 @@ func deleteSetupWithClusterDefaults(
 	tp := topicObj("Enforce")
 	tp.Spec.DeletionPolicy = topicDeletionPolicy
 	tp.Finalizers = []string{FinalizerName}
+	markReconciled(tp)
 	if annotations != nil {
 		tp.Annotations = annotations
 	}
@@ -550,6 +553,7 @@ func TestTopicReconcile_SchemaRegistered(t *testing.T) {
 	sec := &corev1.Secret{}
 	sec.Name = "orders-schema"
 	sec.Namespace = "ns1" // must match the topic's namespace (refs are namespace-local)
+	sec.Labels = map[string]string{CredentialSourceLabel: CredentialSourceLabelValue}
 	sec.Data = map[string][]byte{
 		"value.avsc": []byte(`{"type":"record","name":"Order","fields":[]}`),
 	}
@@ -755,6 +759,7 @@ func TestTopicReconcile_SelfLockoutWarningEvent(t *testing.T) {
 	sec := &corev1.Secret{Data: map[string][]byte{"username": []byte("admin"), "password": []byte("pw")}}
 	sec.Name = "kafka-creds"
 	sec.Namespace = c.Namespace
+	sec.Labels = map[string]string{CredentialSourceLabel: CredentialSourceLabelValue}
 	cl := newTopicFakeClient(t, s, tp, c, sec)
 	rec := events.NewFakeRecorder(16)
 	r := &KafkaTopicReconciler{Client: cl, Scheme: s, Recorder: rec, Clients: stubFactory{k: kafkamock.New(nil, nil)}}
@@ -792,6 +797,7 @@ func TestTopicReconcile_NoSelfLockoutEventWhenListed(t *testing.T) {
 	sec := &corev1.Secret{Data: map[string][]byte{"username": []byte("admin"), "password": []byte("pw")}}
 	sec.Name = "kafka-creds"
 	sec.Namespace = c.Namespace
+	sec.Labels = map[string]string{CredentialSourceLabel: CredentialSourceLabelValue}
 	cl := newTopicFakeClient(t, s, tp, c, sec)
 	rec := events.NewFakeRecorder(16)
 	r := &KafkaTopicReconciler{Client: cl, Scheme: s, Recorder: rec, Clients: stubFactory{k: kafkamock.New(nil, nil)}}
@@ -828,6 +834,7 @@ func deleteSetupWithSchema(
 		ValueSchema: &v1alpha1.ValueFrom{ValueFrom: v1alpha1.ValueSource{Inline: body}},
 	}
 	tp.Finalizers = []string{FinalizerName}
+	markReconciled(tp)
 	if annotations != nil {
 		tp.Annotations = annotations
 	}
@@ -898,6 +905,7 @@ func TestTopicReconcile_DeleteWithSchema_KeySubjectAlsoDeleted(t *testing.T) {
 		KeySchema:   &v1alpha1.ValueFrom{ValueFrom: v1alpha1.ValueSource{Inline: avroBody}},
 	}
 	tp.Finalizers = []string{FinalizerName}
+	markReconciled(tp)
 	tp.Annotations = map[string]string{"gitops.monedula.dev/allow-delete": "true"}
 	c := schemaCluster()
 	cl := newTopicFakeClient(t, s, tp, c)
@@ -939,6 +947,7 @@ func TestTopicReconcile_DeleteGovernanceMode_SubjectSurvives(t *testing.T) {
 		Compatibility: "BACKWARD",
 	}
 	tp.Finalizers = []string{FinalizerName}
+	markReconciled(tp)
 	tp.Annotations = map[string]string{"gitops.monedula.dev/allow-delete": "true"}
 	c := schemaCluster()
 	cl := newTopicFakeClient(t, s, tp, c)
@@ -1063,6 +1072,7 @@ func TestTopicReconcile_DeleteOrphanPolicy_NoSubjectDeletion(t *testing.T) {
 		ValueSchema: &v1alpha1.ValueFrom{ValueFrom: v1alpha1.ValueSource{Inline: avroBody}},
 	}
 	tp.Finalizers = []string{FinalizerName}
+	markReconciled(tp)
 	c := schemaCluster()
 	cl := newTopicFakeClient(t, s, tp, c)
 	if err := cl.Delete(context.Background(), tp); err != nil {
@@ -1129,6 +1139,7 @@ func TestTopicReconcile_DeleteTopicName_SecretDeleted_BodylessPath(t *testing.T)
 		}},
 	}
 	tp.Finalizers = []string{FinalizerName}
+	markReconciled(tp)
 	tp.Annotations = map[string]string{"gitops.monedula.dev/allow-delete": "true"}
 
 	c := schemaCluster()
@@ -1195,6 +1206,7 @@ func TestTopicReconcile_DeleteRecordName_SecretDeleted_SubjectDeletionFailed(t *
 		}},
 	}
 	tp.Finalizers = []string{FinalizerName}
+	markReconciled(tp)
 	tp.Annotations = map[string]string{"gitops.monedula.dev/allow-delete": "true"}
 
 	c := schemaCluster()
@@ -1255,6 +1267,7 @@ func TestTopicRecordName_Delete_InlineBody_SubjectDeleted(t *testing.T) {
 		}},
 	}
 	tp.Finalizers = []string{FinalizerName}
+	markReconciled(tp)
 	tp.Annotations = map[string]string{"gitops.monedula.dev/allow-delete": "true"}
 
 	c := schemaCluster()
@@ -1359,4 +1372,11 @@ func TestTopicReconcile_PassesRESTToEngine(t *testing.T) {
 	if calls := k.Calls(); len(calls) != 0 {
 		t.Fatalf("live mirror topic mutated: %v", calls)
 	}
+}
+
+// markReconciled records tp's current generation as reconciled, the state of
+// a topic the operator has applied. The finalizer only runs destructive
+// cleanup for such a topic (cleanupNotAuthorized).
+func markReconciled(tp *v1alpha1.KafkaTopic) {
+	tp.Status = &v1alpha1.KafkaTopicStatus{ObservedGeneration: tp.Generation}
 }

@@ -84,9 +84,22 @@ spec:
       # KAFKA_* env vars as broker config overrides; service-injected vars like
       # KAFKA_PORT and KAFKA_SERVICE_PORT corrupt the generated server.properties.
       enableServiceLinks: false
+      # Confluent images run as appuser (uid/gid 1000); never run as root.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: kafka
           image: confluentinc/cp-kafka:8.3.1
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: client
               containerPort: 9092
@@ -204,9 +217,22 @@ spec:
         app.kubernetes.io/part-of: monedula-quickstart
     spec:
       restartPolicy: OnFailure
+      # Confluent images run as appuser (uid/gid 1000); never run as root.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: bootstrap
           image: confluentinc/cp-kafka:8.3.1
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           command:
             - bash
             - -c

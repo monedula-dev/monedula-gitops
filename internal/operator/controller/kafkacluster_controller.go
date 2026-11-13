@@ -276,6 +276,17 @@ func (r *KafkaClusterReconciler) mapSecretToClusters(ctx context.Context, obj cl
 	return out
 }
 
+// unlabelledSecretsMessage explains the consequence of referenced Secrets
+// lacking the credential-source label under the current Secret access policy.
+func unlabelledSecretsMessage(unlabelled []string) string {
+	if operator.CurrentSecretAccessPolicy().RequireLabel {
+		return fmt.Sprintf("credential Secret(s) %s lack the %s=%q label; the operator refuses to use them "+
+			"(label them, or run with --require-secret-label=false)", strings.Join(unlabelled, ", "), CredentialSourceLabel, CredentialSourceLabelValue)
+	}
+	return fmt.Sprintf("credential Secret(s) %s lack the %s=%q label; a rotation reconciles only at the periodic resync, not promptly",
+		strings.Join(unlabelled, ", "), CredentialSourceLabel, CredentialSourceLabelValue)
+}
+
 // setCredentialSourceUnwatchedCondition sets CondCredentialSourceUnwatched on st:
 // True (reason SecretNotLabeled) when a referenced credential/TLS Secret lacks
 // the CredentialSourceLabel — a rotation reconciles only at the resync, not
@@ -308,7 +319,7 @@ func (r *KafkaClusterReconciler) setCredentialSourceUnwatchedCondition(ctx conte
 		Type:               v1alpha1.CondCredentialSourceUnwatched,
 		Status:             metav1.ConditionTrue,
 		Reason:             "SecretNotLabeled",
-		Message:            fmt.Sprintf("credential Secret(s) %s lack the %s=%q label; a rotation reconciles only at the periodic resync, not promptly", strings.Join(unlabelled, ", "), CredentialSourceLabel, CredentialSourceLabelValue),
+		Message:            unlabelledSecretsMessage(unlabelled),
 		ObservedGeneration: c.Generation,
 	})
 }

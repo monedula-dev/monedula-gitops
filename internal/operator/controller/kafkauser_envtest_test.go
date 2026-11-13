@@ -78,7 +78,7 @@ func TestEnvtestUserReferencedPasswordLifecycle(t *testing.T) {
 		t.Fatalf("create cluster: %v", err)
 	}
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "user-ref-pw", Namespace: testNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: "user-ref-pw", Namespace: testNamespace, Labels: map[string]string{CredentialSourceLabel: CredentialSourceLabelValue}},
 		Data:       map[string][]byte{"password": []byte("initial")},
 	}
 	if err := env.cl.Create(ctx, secret); err != nil {
@@ -225,7 +225,7 @@ func TestEnvtestUserFinalizerDelete(t *testing.T) {
 		t.Fatalf("create cluster: %v", err)
 	}
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "user-del-pw", Namespace: testNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: "user-del-pw", Namespace: testNamespace, Labels: map[string]string{CredentialSourceLabel: CredentialSourceLabelValue}},
 		Data:       map[string][]byte{"password": []byte("pw")},
 	}
 	if err := env.cl.Create(ctx, secret); err != nil {
@@ -276,7 +276,7 @@ func TestEnvtestUserFinalizerOrphan(t *testing.T) {
 		t.Fatalf("create cluster: %v", err)
 	}
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "user-orphan-pw", Namespace: testNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: "user-orphan-pw", Namespace: testNamespace, Labels: map[string]string{CredentialSourceLabel: CredentialSourceLabelValue}},
 		Data:       map[string][]byte{"password": []byte("pw")},
 	}
 	if err := env.cl.Create(ctx, secret); err != nil {

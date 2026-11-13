@@ -212,6 +212,7 @@ func policyDeleteSetup(t *testing.T, deletionPolicy string, annotations map[stri
 	pol := policyObj("Enforce")
 	pol.Spec.DeletionPolicy = deletionPolicy
 	pol.Finalizers = []string{FinalizerName}
+	pol.Status = &v1alpha1.KafkaAccessPolicyStatus{ObservedGeneration: pol.Generation}
 	if annotations != nil {
 		pol.Annotations = annotations
 	}

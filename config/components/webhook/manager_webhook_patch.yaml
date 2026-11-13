@@ -6,8 +6,21 @@ metadata:
 spec:
   template:
     spec:
+      # Restated from config/manager so this patch is non-root on its own too.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: manager
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
         args:
         - operator
         - --metrics-bind-address=:8080

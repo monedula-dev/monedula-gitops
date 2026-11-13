@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Namespaced Secret RBAC:** new operator flag `--secret-namespaces` and chart value
+  `rbac.secretNamespaces`. When set, the chart drops Secret access from the ClusterRole and grants it
+  through a Role + RoleBinding in each listed namespace only; the operator scopes its Secret watch to
+  those namespaces and refuses Secret references outside them. Empty (default) keeps cluster-wide
+  Secret access.
 - **Import a part of a cluster:** `import cluster` takes repeatable `--topic <glob>` and
   `--exclude-topic <glob>` flags (`path.Match` syntax, as in `spec.tenancy`). Only matching topics
   are imported, together with the ACLs and MDS role bindings on them, their Schema Registry
@@ -37,6 +42,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejected, and an `import` round-trip. It runs in a new `cp-8.3-link` e2e matrix cell.
 
 ### Changed
+- **BREAKING — Secrets must opt in (security):** the operator now only uses a referenced Secret
+  (KafkaCluster credentials and TLS material, KafkaTopic schema bodies, KafkaUser passwords) if it
+  is labelled `gitops.monedula.dev/credential-source=true`. Before, anyone who could create one of
+  these resources could make the operator read any Secret in the namespace and send it to an
+  endpoint they chose, even without RBAC to read that Secret themselves. Only someone who can write
+  a Secret can label it. **Upgrade:** label every Secret your resources reference
+  (`kubectl label secret <name> gitops.monedula.dev/credential-source=true`), or keep the old
+  behaviour with `--require-secret-label=false` (chart: `requireSecretLabel: false`). Unlabelled
+  references fail with an error naming the Secret and the label; a KafkaUser reports
+  `SecretNotLabeled`, and a KafkaCluster's `CredentialSourceUnwatched` condition lists them.
+- Go 1.26.11 minimum (`go.mod`); all Go dependencies updated to their latest releases that support it.
 - **Operator, `KafkaTopic` finalizer:** the `gitops.monedula.dev/force-finalizer-removal`
   annotation now always orphans: the finalizer is removed with no topic, ACL or schema cleanup,
   even when the cluster is reachable and `gitops.monedula.dev/allow-delete` is set.
@@ -53,8 +69,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Mirror guard (CLI and operator):** for a live or stopping mirror topic, or one whose mirror
   state is unknown, ACL prune (`DeleteAcl`) on the literal topic resource is now suppressed as
   well as ACL creation. Prefixed and wildcard ACLs are unaffected.
+- **Validated versions:** CI now also runs against Apache Kafka 4.4 (`apache/kafka:4.4.0`, new
+  `ak-4.4` cell). It takes over from 4.3 as the Apache cell paired with Confluent Schema Registry
+  and run in the end-to-end scenario suite; Apache Kafka 4.3 stays in the adapter integration
+  tests. The `compose.apache.yaml` overlays default to `apache/kafka:4.4.0`.
 
 ### Fixed
+- **Security — tenancy:** an empty-string `spec.tenancy.topicPrefixes[].prefixes` entry is now
+  rejected by validation and ignored by enforcement; previously it matched every name and lifted the
+  namespace's prefix restriction. A namespace matched by a rule stays restricted even if no usable
+  prefix is left.
+- **Security — Schema Registry subjects:** subjects a `KafkaTopic` manages (Custom and RecordName
+  strategies name them independently of the topic) are now checked against the namespace's
+  tenancy prefixes on reconcile and before finalizer deletion (`TenancyDenied`).
+- **Security — finalizers:** the `KafkaTopic`, `KafkaAccessPolicy`, `KafkaQuota` and `KafkaUser`
+  finalizers only run destructive cleanup for a spec the operator applied (current generation
+  reconciled, not refused by validation or tenancy) and that the current tenancy policy still
+  allows. Otherwise they leave broker state in place and emit a `CleanupSkipped` event. This closes
+  edits to a terminating CR redirecting cleanup, and refused CRs deleting state they never managed.
+- **Security — ACL conflicts:** a cross-resource Allow/Deny conflict on one ACL tuple now resolves
+  to the Deny, and every owner's `spec.prune` consent (including the conflict loser's) takes part
+  in the prune veto, so an Allow policy can no longer override or prune another resource's Deny.
+- **Security — non-root manifests:** the quickstart and scenario Kafka / Schema Registry workloads
+  and the webhook patch run as non-root with a pinned UID, `RuntimeDefault` seccomp, no privilege
+  escalation and all capabilities dropped; the operator pins UID/GID 65532.
 - **CLI, `KafkaMirrorTopic` apply:** a mirror create that Kafka REST rejects with a 4xx (for
   example a missing source topic, 404) is reported as `rejected by Kafka REST (<status>)`
   instead of "outcome unknown, re-run diff before retrying".
