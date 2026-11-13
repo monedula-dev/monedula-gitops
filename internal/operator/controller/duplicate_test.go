@@ -585,7 +585,7 @@ func TestUserCoClaimantShield_DeletingWinnerOrphansToLoser(t *testing.T) {
 func TestUserCoClaimantShield_DifferentMechanismDoesNotSkipCleanup(t *testing.T) {
 	s := topicScheme(t)
 	doomed := stampedUser("ns1", "svc-a", "prod", "svc-shared", dupT0)
-	doomed.Finalizers = []string{FinalizerName} // defaulted mechanism: SCRAM-SHA-512
+	doomed.Finalizers = []string{FinalizerName}                                      // defaulted mechanism: SCRAM-SHA-512
 	doomed.Status = &v1alpha1.KafkaUserStatus{ObservedGeneration: doomed.Generation} // last reconcile applied it
 	other := stampedUser("ns1", "svc-b", "prod", "svc-shared", dupLater())
 	other.Spec.Mechanism = "SCRAM-SHA-256"
