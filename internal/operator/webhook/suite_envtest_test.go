@@ -63,6 +63,43 @@ type webhookTestEnv struct {
 	stop func()
 }
 
+// cacheSyncedClient wraps the direct test client so that Create returns only
+// once the manager's informer cache can see the new object. The validators read
+// through the manager's cached client, so without this a follow-up admission
+// (e.g. a duplicate create right after the original) can race the informer and
+// be wrongly admitted — or, for role bindings, see "cluster not found" and
+// allow. Waiting here makes "create A, then expect B rejected" deterministic.
+type cacheSyncedClient struct {
+	client.Client
+	cache client.Reader
+}
+
+func newCacheSyncedClient(cl client.Client, cache client.Reader) client.Client {
+	return &cacheSyncedClient{Client: cl, cache: cache}
+}
+
+func (c *cacheSyncedClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
+	if err := c.Client.Create(ctx, obj, opts...); err != nil {
+		return err
+	}
+	key := client.ObjectKeyFromObject(obj)
+	probe, ok := obj.DeepCopyObject().(client.Object)
+	if !ok {
+		return nil
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		err := c.cache.Get(ctx, key, probe)
+		if err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("created %s but manager cache did not observe it: %w", key, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 // isAssetsUnavailable mirrors the controller suite: reports whether envtest's
 // control-plane binaries are unavailable so a binary-less run skips.
 func isAssetsUnavailable(err error) bool {
@@ -241,7 +278,7 @@ func startWebhookEnv(t *testing.T, clusterNamespace string) *webhookTestEnv {
 	}
 
 	return &webhookTestEnv{
-		cl: cl,
+		cl: newCacheSyncedClient(cl, mgr.GetCache()),
 		stop: func() {
 			cancel()
 			<-mgrDone
