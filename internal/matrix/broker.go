@@ -23,11 +23,13 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/testcontainers/testcontainers-go"
 	tckafka "github.com/testcontainers/testcontainers-go/modules/kafka"
 	"github.com/testcontainers/testcontainers-go/network"
 	"github.com/testcontainers/testcontainers-go/wait"
+	"github.com/twmb/franz-go/pkg/kgo"
 )
 
 // apacheStarterScript is the apache/kafka image's own /etc/kafka/docker/run with
@@ -118,13 +120,62 @@ func StartBroker(ctx context.Context, c Cell, opts ...Option) (*Broker, error) {
 		o(&sc)
 	}
 
+	var (
+		b   *Broker
+		err error
+	)
 	switch c.Family {
 	case FamilyConfluent:
-		return startConfluent(ctx, c, sc)
+		b, err = startConfluent(ctx, c, sc)
 	case FamilyApache:
-		return startApache(ctx, c, sc)
+		b, err = startApache(ctx, c, sc)
 	default:
 		return nil, fmt.Errorf("matrix: cell %q has unknown family %q", c.ID, c.Family)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := waitBrokerServing(ctx, b.Bootstrap); err != nil {
+		return nil, errors.Join(
+			fmt.Errorf("matrix: broker %s never served requests: %w", c.Image, err),
+			testcontainers.TerminateContainer(b.Container),
+		)
+	}
+	return b, nil
+}
+
+// brokerServingTimeout bounds waitBrokerServing.
+const brokerServingTimeout = 60 * time.Second
+
+// waitBrokerServing blocks until the broker answers a real Kafka request on the
+// host-reachable listener. The containers' log-based readiness ("Kafka Server
+// started" / "Transitioning from RECOVERY to RUNNING") can fire a moment before
+// the client listener processes requests; a client connecting in that window
+// sees the connection closed during ApiVersions negotiation, which franz-go
+// reports as "is TLS missing?". Seen once on cp-8.0 in CI.
+func waitBrokerServing(ctx context.Context, bootstrap []string) error {
+	ctx, cancel := context.WithTimeout(ctx, brokerServingTimeout)
+	defer cancel()
+
+	cl, err := kgo.NewClient(kgo.SeedBrokers(bootstrap...))
+	if err != nil {
+		return fmt.Errorf("building probe client: %w", err)
+	}
+	defer cl.Close()
+
+	var lastErr error
+	for {
+		pingCtx, pingCancel := context.WithTimeout(ctx, 5*time.Second)
+		lastErr = cl.Ping(pingCtx)
+		pingCancel()
+		if lastErr == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%w (last error: %v)", ctx.Err(), lastErr)
+		case <-time.After(250 * time.Millisecond):
+		}
 	}
 }
 
