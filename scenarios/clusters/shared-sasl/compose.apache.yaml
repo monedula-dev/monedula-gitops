@@ -11,7 +11,7 @@
 # /opt/kafka/bin is NOT on PATH, and the scripts carry a .sh suffix.
 services:
   kafka:
-    image: ${MONEDULA_KAFKA_IMAGE:-apache/kafka:4.3.1}
+    image: ${MONEDULA_KAFKA_IMAGE:-apache/kafka:4.4.0}
     healthcheck:
       test: ["CMD", "/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "kafka:9094"]
       interval: 10s
@@ -20,7 +20,7 @@ services:
       start_period: 20s
 
   kafka-init:
-    image: ${MONEDULA_KAFKA_IMAGE:-apache/kafka:4.3.1}
+    image: ${MONEDULA_KAFKA_IMAGE:-apache/kafka:4.4.0}
     command:
       - |
         set -euo pipefail

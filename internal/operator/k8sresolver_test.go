@@ -37,7 +37,7 @@ func newResolver(t *testing.T, objs ...interface{}) *K8sResolver {
 
 func secretObj() *corev1.Secret {
 	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "creds", Namespace: "ns1"},
+		ObjectMeta: metav1.ObjectMeta{Name: "creds", Namespace: "ns1", Labels: map[string]string{CredentialSourceLabel: CredentialSourceLabelValue}},
 		Data: map[string][]byte{
 			"username": []byte("alice"),
 			"ca.crt":   []byte("-----BEGIN CERTIFICATE-----\nPEM\n-----END CERTIFICATE-----"),
@@ -228,7 +228,7 @@ func selfSignedCAPEMForTest(t *testing.T) []byte {
 // Mirrors TestK8sResolver_ResolveCACertSecretKeyRef for the SR TLS path.
 func TestK8sResolver_SchemaRegistryTLSCACertSecretKeyRef(t *testing.T) {
 	caSecret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "sr-ca", Namespace: "ns1"},
+		ObjectMeta: metav1.ObjectMeta{Name: "sr-ca", Namespace: "ns1", Labels: map[string]string{CredentialSourceLabel: CredentialSourceLabelValue}},
 		Data:       map[string][]byte{"ca.crt": selfSignedCAPEMForTest(t)},
 	}
 	r := newResolver(t, caSecret)

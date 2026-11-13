@@ -73,11 +73,24 @@ spec:
         app.kubernetes.io/name: schema-registry
         app.kubernetes.io/part-of: monedula-quickstart
     spec:
+      # Confluent images run as appuser (uid/gid 1000); never run as root.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         # Wait until Kafka accepts SASL/SCRAM connections on :9092, i.e. until
         # the kafka-scram-bootstrap Job has created the `admin` SCRAM user.
         - name: wait-for-kafka-sasl
           image: confluentinc/cp-kafka:8.3.1
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           command:
             - bash
             - -c
@@ -105,6 +118,11 @@ spec:
       containers:
         - name: schema-registry
           image: confluentinc/cp-schema-registry:8.3.1
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: http
               containerPort: 8081

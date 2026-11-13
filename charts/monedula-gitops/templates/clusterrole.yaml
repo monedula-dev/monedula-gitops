@@ -15,6 +15,7 @@ rules:
   - get
   - list
   - watch
+{{- if not .Values.rbac.secretNamespaces }}
 - apiGroups:
   - ""
   resources:
@@ -25,6 +26,7 @@ rules:
   - list
   - update
   - watch
+{{- end }}
 - apiGroups:
   - authentication.k8s.io
   resources:

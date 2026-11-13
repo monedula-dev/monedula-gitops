@@ -28,6 +28,7 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/operator/reconcile"
 	operatorwebhook "github.com/monedula-dev/monedula-gitops/internal/operator/webhook"
 	"github.com/monedula-dev/monedula-gitops/internal/quota"
+	"github.com/monedula-dev/monedula-gitops/internal/tenancy"
 )
 
 // quotaRequeueAfter is the DEFAULT periodic resync interval, used when a
@@ -272,6 +273,18 @@ func (r *KafkaQuotaReconciler) handleDeletionWithClient(ctx context.Context, q *
 		return ctrl.Result{}, nil
 	}
 
+	// Cleanup authorization: only remove a quota this CR was allowed to
+	// manage. A CR in a namespace the tenancy policy denies (or whose spec was
+	// repointed at another entity after the last reconcile, e.g. while it
+	// terminates) would otherwise let a tenant strip any entity's quota by
+	// creating and deleting a KafkaQuota. Orphan instead: no broker change,
+	// and the deletion is never wedged.
+	if reason := r.quotaCleanupNotAuthorized(ctx, q); reason != "" {
+		r.finalizeEvent(q, corev1.EventTypeWarning, reasonCleanupSkipped,
+			"managed quota left in place: "+reason)
+		return r.removeFinalizer(ctx, q)
+	}
+
 	co, cerr := findLiveQuotaCoClaimant(ctx, r.Client, q, r.ClusterNamespace == "")
 	// Quorum recheck (duplicate.go): only when the cached scan found NO live
 	// co-claimant — the branch about to DESTROY broker state — re-scan through
@@ -317,6 +330,32 @@ func (r *KafkaQuotaReconciler) handleDeletionWithClient(ctx context.Context, q *
 	}
 
 	return r.removeFinalizer(ctx, q)
+}
+
+// quotaCleanupNotAuthorized returns a non-empty reason when the finalizer
+// must not delete q's broker quota: q's current spec was never reconciled, or
+// the referenced cluster's tenancy policy does not allow q's namespace.
+func (r *KafkaQuotaReconciler) quotaCleanupNotAuthorized(ctx context.Context, q *v1alpha1.KafkaQuota) string {
+	var observed int64
+	var conds []metav1.Condition
+	if q.Status != nil {
+		observed, conds = q.Status.ObservedGeneration, q.Status.Conditions
+	}
+	if reason := cleanupNotApplied(q.Generation, observed, conds); reason != "" {
+		return reason
+	}
+	clusterNS := r.ClusterNamespace
+	if clusterNS == "" {
+		clusterNS = q.Namespace
+	}
+	var cluster v1alpha1.KafkaCluster
+	if err := r.Get(ctx, types.NamespacedName{Namespace: clusterNS, Name: q.Spec.ClusterRef.Name}, &cluster); err != nil {
+		return "cannot read the referenced KafkaCluster to check tenancy: " + err.Error()
+	}
+	if err := tenancy.CheckNamespace(cluster.Spec.Tenancy, q.Namespace); err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 // removeFinalizer drops the finalizer and persists it, letting Kubernetes

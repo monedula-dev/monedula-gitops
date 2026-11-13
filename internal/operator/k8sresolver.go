@@ -69,13 +69,23 @@ func (r *K8sResolver) Resolve(vf v1alpha1.ValueFrom) (string, error) {
 }
 
 // readKey fetches Secret <Namespace>/<ref.Name> and returns data[ref.Key],
-// erroring if the Secret or the key is absent. The returned bytes are the raw
+// erroring if the Secret or the key is absent, or if the Secret access policy
+// (SecretAccessPolicy) rejects it. The returned bytes are the raw
 // Secret value and must never be logged.
 func (r *K8sResolver) readKey(ref *v1alpha1.SecretKeyRef) ([]byte, error) {
 	var sec corev1.Secret
 	key := types.NamespacedName{Namespace: r.Namespace, Name: ref.Name}
+	if err := CheckSecretNamespace(r.Namespace); err != nil {
+		return nil, fmt.Errorf("reading secret %s: %w", key, err)
+	}
 	if err := r.Client.Get(r.Ctx, key, &sec); err != nil {
 		return nil, fmt.Errorf("reading secret %s: %w", key, err)
+	}
+	// Opt-in gate: a CR author who can merely NAME a Secret must not be able
+	// to make the operator read it (and send it to a destination the CR
+	// chose). See CredentialSourceLabel.
+	if err := CheckReferencedSecret(&sec); err != nil {
+		return nil, err
 	}
 	v, ok := sec.Data[ref.Key]
 	if !ok {

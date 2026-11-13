@@ -13,6 +13,7 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/diff"
 	"github.com/monedula-dev/monedula-gitops/internal/executor"
 	"github.com/monedula-dev/monedula-gitops/internal/kafka"
+	"github.com/monedula-dev/monedula-gitops/internal/operator"
 	"github.com/monedula-dev/monedula-gitops/internal/tenancy"
 	"github.com/monedula-dev/monedula-gitops/internal/user"
 	"github.com/monedula-dev/monedula-gitops/internal/validation"
@@ -31,6 +32,10 @@ const (
 	// KafkaUser. TERMINAL: the operator never adopts or overwrites a foreign
 	// Secret — a human must delete/rename it (or rename the CR).
 	reasonForeignSecret = "ForeignSecret"
+	// reasonSecretNotLabeled: a referenced password Secret lacks the
+	// credential-source opt-in label (operator.CredentialSourceLabel) while
+	// the operator requires it. TERMINAL until the Secret is labelled.
+	reasonSecretNotLabeled = "SecretNotLabeled"
 )
 
 // generatedSecretSuffix names the operator-owned Secret in generate mode:
@@ -62,6 +67,9 @@ type PasswordSecret struct {
 	// Owned is true when the Secret has a controller owner reference to the
 	// reconciling KafkaUser.
 	Owned bool
+	// Labeled is true when the Secret carries the credential-source opt-in
+	// label (operator.CredentialSourceLabel).
+	Labeled bool
 }
 
 // PasswordSecretStore is ReconcileUser's seam to Kubernetes Secrets in the
@@ -324,6 +332,15 @@ func sourceReferencedPassword(ctx context.Context, u *v1alpha1.KafkaUser, store 
 	}
 	if sec == nil {
 		return passwordSource{transientErr: fmt.Errorf("password secret %q not found", ref.Name)}
+	}
+	// Opt-in gate (operator.SecretAccessPolicy): naming a Secret in a
+	// KafkaUser must not be enough to make the operator read it.
+	if operator.CurrentSecretAccessPolicy().RequireLabel && !sec.Labeled {
+		return passwordSource{
+			terminalReason: reasonSecretNotLabeled,
+			terminalMsg: fmt.Sprintf("password secret %q is not labelled %s=%s; the operator only uses Secrets opted in with this label",
+				ref.Name, operator.CredentialSourceLabel, operator.CredentialSourceLabelValue),
+		}
 	}
 	v, ok := sec.Data[ref.Key]
 	if !ok {

@@ -96,13 +96,29 @@ func IsPrefixRestricted(t *v1alpha1.TenancyConfig, namespace string) bool {
 }
 
 // allowedPrefixes returns the union of Prefixes from every TopicPrefixRule
-// whose Namespaces globs match namespace. A non-nil empty slice is never
-// returned: nil means "no rule matches" (namespace is not prefix-restricted).
+// whose Namespaces globs match namespace. nil means "no rule matches"
+// (namespace is not prefix-restricted). When at least one rule matches, the
+// result is NON-NIL even if it is empty, so a matched namespace stays
+// restricted (fail closed) and an empty set denies every name.
+//
+// Empty-string prefixes are dropped: strings.HasPrefix(name, "") is true for
+// every name, so honouring "" would silently lift the namespace's prefix
+// restriction and let it claim other tenants' topics and groups. Validation
+// rejects "" up front; dropping it here keeps enforcement safe even when a
+// KafkaCluster reached the operator without passing validation.
 func allowedPrefixes(t *v1alpha1.TenancyConfig, namespace string) []string {
 	var allowed []string
 	for _, rule := range t.TopicPrefixes {
-		if namespaceMatchesRule(rule.Namespaces, namespace) {
-			allowed = append(allowed, rule.Prefixes...)
+		if !namespaceMatchesRule(rule.Namespaces, namespace) {
+			continue
+		}
+		if allowed == nil {
+			allowed = []string{}
+		}
+		for _, p := range rule.Prefixes {
+			if p != "" {
+				allowed = append(allowed, p)
+			}
 		}
 	}
 	return allowed
@@ -118,6 +134,8 @@ func allowedPrefixes(t *v1alpha1.TenancyConfig, namespace string) []string {
 //     call-site symmetry with ACLResource and otherwise unused);
 //   - resourceType "group": the name is prefix-checked against the SAME
 //     TopicPrefixes (groups reuse topic prefixes by design);
+//   - resourceType "subject" (a Schema Registry subject a KafkaTopic manages):
+//     prefix-checked against the same TopicPrefixes;
 //   - any other resourceType (cluster, transactionalId, delegationToken):
 //     DENIED when the namespace is prefix-restricted — these resources cannot
 //     be scoped by a name prefix, and allowing them would let a tenant
@@ -136,6 +154,13 @@ func CheckResource(t *v1alpha1.TenancyConfig, namespace, resourceType, resourceN
 		return checkPrefix(t, namespace, "topic", resourceName)
 	case "group":
 		return checkPrefix(t, namespace, "group", resourceName)
+	case "subject":
+		// Schema Registry subjects reuse the topic prefixes too: a team that
+		// owns "payments." owns "payments."-prefixed subjects. Without this a
+		// prefix-restricted KafkaTopic could name another team's subject via
+		// the Custom / RecordName subject strategies and overwrite its
+		// compatibility level, register versions, or delete it on finalize.
+		return checkPrefix(t, namespace, "subject", resourceName)
 	default:
 		// cluster, transactionalId, delegationToken (and anything future):
 		// unscopeable by prefix — fail closed for prefix-restricted namespaces.
@@ -234,8 +259,10 @@ func checkPrefix(t *v1alpha1.TenancyConfig, namespace, kind, name string) error 
 // list once via allowedPrefixes and call this directly instead of
 // re-deriving it per name via checkPrefix.
 func checkPrefixAllowed(allowed []string, namespace, kind, name string) error {
-	if len(allowed) == 0 {
-		// No rule matched this namespace: unrestricted.
+	if allowed == nil {
+		// No rule matched this namespace: unrestricted. A non-nil empty
+		// slice (a matching rule with no usable prefix) falls through and
+		// denies every name.
 		return nil
 	}
 

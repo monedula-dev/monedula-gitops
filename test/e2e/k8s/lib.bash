@@ -230,12 +230,16 @@ setup_auth_profile() {
         --from-file=client.crt="${dir}/certs/client.crt" \
         --from-file=client.key="${dir}/certs/client.key" \
         --dry-run=client -o yaml | kubectl apply -f -
+      # Opt the Secret in: the operator only uses labelled Secrets (--require-secret-label).
+      kubectl -n "${E2E_NS}" label secret kafka-mtls gitops.monedula.dev/credential-source=true --overwrite
       ;;
     auth-oauth)
       kubectl -n "${E2E_NS}" create secret generic kafka-oauth \
         --from-literal=client-id=monedula \
         --from-literal=client-secret=monedula-secret \
         --dry-run=client -o yaml | kubectl apply -f -
+      # Opt the Secret in: the operator only uses labelled Secrets (--require-secret-label).
+      kubectl -n "${E2E_NS}" label secret kafka-oauth gitops.monedula.dev/credential-source=true --overwrite
       ;;
     auth-mds)
       kubectl -n "${E2E_NS}" create secret generic kafka-mds \
@@ -244,6 +248,8 @@ setup_auth_profile() {
         --from-literal=mds-username=mds \
         --from-literal=mds-password=mds-secret \
         --dry-run=client -o yaml | kubectl apply -f -
+      # Opt the Secret in: the operator only uses labelled Secrets (--require-secret-label).
+      kubectl -n "${E2E_NS}" label secret kafka-mds gitops.monedula.dev/credential-source=true --overwrite
       ;;
     auth-sasl-ssl)
       kubectl -n "${E2E_NS}" create secret generic kafka-sasl-ssl \
@@ -251,6 +257,8 @@ setup_auth_profile() {
         --from-literal=scram-username=admin \
         --from-literal=scram-password=admin-secret \
         --dry-run=client -o yaml | kubectl apply -f -
+      # Opt the Secret in: the operator only uses labelled Secrets (--require-secret-label).
+      kubectl -n "${E2E_NS}" label secret kafka-sasl-ssl gitops.monedula.dev/credential-source=true --overwrite
       ;;
     *)
       echo "setup_auth_profile: unknown profile ${profile}" >&2; return 1 ;;

@@ -47,6 +47,9 @@ func fvDeletingTopic(t *testing.T, withSchema bool) client.Client {
 	tp.Spec.DeletionPolicy = "Delete"
 	tp.Finalizers = []string{FinalizerName}
 	tp.Annotations = allowDelete()
+	// Last reconciled at the current generation: the finalizer only cleans up a
+	// spec the operator has applied (cleanupNotAuthorized).
+	tp.Status = &v1alpha1.KafkaTopicStatus{ObservedGeneration: tp.Generation}
 	if withSchema {
 		tp.Spec.Schema = &v1alpha1.TopicSchema{
 			Format:      "AVRO",

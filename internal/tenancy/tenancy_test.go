@@ -648,3 +648,38 @@ func TestCheckRoleBinding(t *testing.T) {
 		})
 	}
 }
+
+// TestEmptyPrefixFailsClosed is the regression test for the empty-prefix
+// tenancy bypass: an empty-string prefix (or a matching rule whose prefixes
+// are all empty) must NOT lift a namespace's prefix restriction.
+func TestEmptyPrefixFailsClosed(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  *v1alpha1.TenancyConfig
+	}{
+		{"empty-string prefix only", makeConfig(nil, []v1alpha1.TopicPrefixRule{prefixRule([]string{"team-a"}, []string{""})})},
+		{"empty prefixes list", makeConfig(nil, []v1alpha1.TopicPrefixRule{prefixRule([]string{"team-a"}, nil)})},
+		{"empty-string alongside real prefix", makeConfig(nil, []v1alpha1.TopicPrefixRule{prefixRule([]string{"team-a"}, []string{"", "a."})})},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !IsPrefixRestricted(tc.cfg, "team-a") {
+				t.Fatal("namespace matched by a rule must stay prefix-restricted")
+			}
+			if err := Check(tc.cfg, "team-a", "b.payments"); err == nil {
+				t.Error("Check: foreign topic allowed via empty prefix")
+			}
+			if err := CheckResource(tc.cfg, "team-a", "group", "b.consumers", "literal"); err == nil {
+				t.Error("CheckResource: foreign group allowed via empty prefix")
+			}
+			if err := CheckRoleBinding(tc.cfg, "team-a", []v1alpha1.RoleResource{{Type: "Topic", Name: "b.payments"}}); err == nil {
+				t.Error("CheckRoleBinding: foreign topic allowed via empty prefix")
+			}
+		})
+	}
+	// A real prefix next to "" still works.
+	cfg := makeConfig(nil, []v1alpha1.TopicPrefixRule{prefixRule([]string{"team-a"}, []string{"", "a."})})
+	if err := Check(cfg, "team-a", "a.orders"); err != nil {
+		t.Errorf("Check: own prefix denied: %v", err)
+	}
+}

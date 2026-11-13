@@ -29,6 +29,7 @@ import (
 	"github.com/monedula-dev/monedula-gitops/internal/operator/locking"
 	"github.com/monedula-dev/monedula-gitops/internal/operator/reconcile"
 	operatorwebhook "github.com/monedula-dev/monedula-gitops/internal/operator/webhook"
+	"github.com/monedula-dev/monedula-gitops/internal/tenancy"
 )
 
 // KafkaUserReconciler reconciles a KafkaUser. It is the SCRAM-credential
@@ -284,6 +285,17 @@ func (r *KafkaUserReconciler) handleDeletionWithClient(ctx context.Context, u *v
 	defaulting.User(u)
 
 	if u.Spec.DeletionPolicy == deletionPolicyDelete {
+		// Cleanup authorization: the finalizer is added before the reconcile
+		// engine's validation and tenancy gates run, so a KafkaUser that was
+		// refused (tenancy-denied namespace, invalid spec, foreign Secret) —
+		// or whose spec changed after its last reconcile — still carries it.
+		// Deleting such a CR must not delete the SCRAM credential of the
+		// username it names (e.g. a cluster admin's). Orphan instead.
+		if reason := r.userCleanupNotAuthorized(ctx, u); reason != "" {
+			r.finalizeEvent(u, corev1.EventTypeWarning, reasonCleanupSkipped,
+				"SCRAM credential left in place: "+reason)
+			return r.removeFinalizer(ctx, u)
+		}
 		co, cerr := findLiveUserCoClaimant(ctx, r.Client, u, r.ClusterNamespace == "")
 		// Quorum recheck (duplicate.go): only when the cached scan found NO
 		// live co-claimant — the branch about to DESTROY broker state —
@@ -322,6 +334,33 @@ func (r *KafkaUserReconciler) handleDeletionWithClient(ctx context.Context, u *v
 	// Orphan: leave the credential in place.
 
 	return r.removeFinalizer(ctx, u)
+}
+
+// userCleanupNotAuthorized returns a non-empty reason when the finalizer must
+// not delete u's SCRAM credential: u's current spec was never applied (see
+// cleanupNotApplied), or the referenced cluster's tenancy policy does not
+// allow u's namespace.
+func (r *KafkaUserReconciler) userCleanupNotAuthorized(ctx context.Context, u *v1alpha1.KafkaUser) string {
+	var observed int64
+	var conds []metav1.Condition
+	if u.Status != nil {
+		observed, conds = u.Status.ObservedGeneration, u.Status.Conditions
+	}
+	if reason := cleanupNotApplied(u.Generation, observed, conds); reason != "" {
+		return reason
+	}
+	clusterNS := r.ClusterNamespace
+	if clusterNS == "" {
+		clusterNS = u.Namespace
+	}
+	var cluster v1alpha1.KafkaCluster
+	if err := r.Get(ctx, types.NamespacedName{Namespace: clusterNS, Name: u.Spec.ClusterRef.Name}, &cluster); err != nil {
+		return "cannot read the referenced KafkaCluster to check tenancy: " + err.Error()
+	}
+	if err := tenancy.CheckNamespace(cluster.Spec.Tenancy, u.Namespace); err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 // removeFinalizer drops the finalizer and persists it, letting Kubernetes
@@ -413,6 +452,9 @@ var _ reconcile.PasswordSecretStore = (*userSecretStore)(nil)
 // when absent. Owned reflects a CONTROLLER owner reference to the owning
 // KafkaUser (UID-matched), the generate-mode adoption guard.
 func (s *userSecretStore) GetSecret(ctx context.Context, name string) (*reconcile.PasswordSecret, error) {
+	if err := operator.CheckSecretNamespace(s.owner.Namespace); err != nil {
+		return nil, err
+	}
 	var sec corev1.Secret
 	err := s.client.Get(ctx, types.NamespacedName{Namespace: s.owner.Namespace, Name: name}, &sec)
 	if apierrors.IsNotFound(err) {
@@ -425,6 +467,7 @@ func (s *userSecretStore) GetSecret(ctx context.Context, name string) (*reconcil
 		Data:            sec.Data,
 		ResourceVersion: sec.ResourceVersion,
 		Owned:           metav1.IsControlledBy(&sec, s.owner),
+		Labeled:         operator.HasCredentialSourceLabel(&sec),
 	}, nil
 }
 
@@ -435,6 +478,9 @@ func (s *userSecretStore) GetSecret(ctx context.Context, name string) (*reconcil
 // Owns() watch actually see its events (a user deleting it triggers prompt
 // regeneration instead of waiting out the resync).
 func (s *userSecretStore) CreateOwnedSecret(ctx context.Context, name string, data map[string][]byte) error {
+	if err := operator.CheckSecretNamespace(s.owner.Namespace); err != nil {
+		return err
+	}
 	sec := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
