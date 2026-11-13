@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-11
+
 ### Added
 - **Import a part of a cluster:** `import cluster` takes repeatable `--topic <glob>` and
   `--exclude-topic <glob>` flags (`path.Match` syntax, as in `spec.tenancy`). Only matching topics
@@ -408,6 +410,7 @@ First public release.
   batched `DescribeTopicConfigs` request for all topics instead of one round-trip per topic
   (per-topic error semantics and result ordering are unchanged).
 
-[Unreleased]: https://github.com/monedula-dev/monedula-gitops/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/monedula-dev/monedula-gitops/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/monedula-dev/monedula-gitops/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/monedula-dev/monedula-gitops/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/monedula-dev/monedula-gitops/releases/tag/v0.1.0
