@@ -142,7 +142,7 @@ func startMirrorWebhookEnv(t *testing.T) *webhookTestEnv {
 	}
 
 	return &webhookTestEnv{
-		cl: cl,
+		cl: newCacheSyncedClient(cl, mgr.GetCache()),
 		stop: func() {
 			cancel()
 			<-mgrDone
