@@ -126,6 +126,8 @@ metadata:
   namespace: monedula-e2e
   labels:
     app.kubernetes.io/part-of: monedula-e2e
+    # Opt-in: the operator only uses Secrets with this label (--require-secret-label).
+    gitops.monedula.dev/credential-source: "true"
 type: Opaque
 stringData:
   kafka-username: admin
@@ -183,12 +185,16 @@ CERTS_DIR="${REPO_ROOT}/scenarios/clusters/auth-sasl-ssl/certs"
 kubectl -n "${E2E_NS}" create secret generic kafka-ca \
   --from-file=ca.crt="${CERTS_DIR}/ca.crt" \
   --dry-run=client -o yaml | kubectl apply -f -
+# Opt the Secret in: the operator only uses labelled Secrets (--require-secret-label).
+kubectl -n "${E2E_NS}" label secret kafka-ca gitops.monedula.dev/credential-source=true --overwrite
 
 kubectl -n "${E2E_NS}" create secret generic kafka-tls \
   --from-file=ca.crt="${CERTS_DIR}/ca.crt" \
   --from-file=server.crt="${CERTS_DIR}/server.crt" \
   --from-file=server.key="${CERTS_DIR}/server.key" \
   --dry-run=client -o yaml | kubectl apply -f -
+# Opt the Secret in: the operator only uses labelled Secrets (--require-secret-label).
+kubectl -n "${E2E_NS}" label secret kafka-tls gitops.monedula.dev/credential-source=true --overwrite
 
 echo "    NOTE: scenario 04-sasl-ssl runs against the shared-sasl broker too."
 echo "          The shared broker now runs on the host via docker-compose (SASL_PLAINTEXT),"

@@ -73,6 +73,13 @@ func newOperatorCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&opts.EnableWebhooks, "enable-webhooks", false,
 		"enable the validating admission webhooks for KafkaTopic, KafkaQuota, KafkaAccessPolicy, "+
 			"KafkaRoleBinding, KafkaUser, and KafkaMirrorTopic (requires serving certs; spec §20.3)")
+	cmd.Flags().BoolVar(&opts.RequireSecretLabel, "require-secret-label", true,
+		"only use referenced Secrets labelled gitops.monedula.dev/credential-source=true (KafkaCluster credentials "+
+			"and TLS, KafkaTopic schema bodies, KafkaUser passwords); false restores the previous behaviour of reading any "+
+			"Secret a resource names")
+	cmd.Flags().StringSliceVar(&opts.SecretNamespaces, "secret-namespaces", nil,
+		"comma-separated namespaces the operator may read, write and watch Secrets in (empty: all namespaces); "+
+			"set it to run with namespaced Secret RBAC instead of a cluster-wide grant")
 	cmd.Flags().StringVar(&opts.WebhookCertDir, "webhook-cert-dir", "",
 		"directory holding the webhook server's serving cert/key (empty: controller-runtime default; only used with --enable-webhooks)")
 	cmd.Flags().DurationVar(&opts.ResyncInterval, "resync-interval", controller.DefaultResyncInterval,

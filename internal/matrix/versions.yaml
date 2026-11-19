@@ -29,11 +29,17 @@ cells:
     tiers: [integration]
     capabilities: [topics, acls, quotas, scram]
 
-  # Deliberately pairs an Apache broker with a Confluent Schema Registry: a
-  # common real-world combination that nothing else in the suite covers.
   - id: ak-4.3
     family: apache
     image: apache/kafka:4.3.1
+    tiers: [integration]
+    capabilities: [topics, acls, quotas, scram]
+
+  # Deliberately pairs an Apache broker with a Confluent Schema Registry: a
+  # common real-world combination that nothing else in the suite covers.
+  - id: ak-4.4
+    family: apache
+    image: apache/kafka:4.4.0
     schemaRegistryImage: confluentinc/cp-schema-registry:8.3.1
     tiers: [integration, e2e]
     capabilities: [topics, acls, quotas, scram, schemaregistry]

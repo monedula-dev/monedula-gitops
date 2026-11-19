@@ -28,6 +28,18 @@ serviceAccount:
 
 rbac:
   create: true
+  # Namespaces the operator may read, write and watch Secrets in (--secret-namespaces).
+  # Empty (default): Secret access is granted cluster-wide in the ClusterRole. Non-empty: the
+  # ClusterRole carries NO Secret rule; a Role + RoleBinding is rendered in each listed namespace
+  # instead, and the operator refuses Secret references outside them. List every namespace whose
+  # KafkaCluster / KafkaTopic / KafkaUser resources reference Secrets (with clusterNamespace set,
+  # that is the cluster namespace plus the namespaces of topics and users that reference Secrets).
+  secretNamespaces: []
+
+# Use only Secrets labelled gitops.monedula.dev/credential-source=true (--require-secret-label).
+# Keep this on: without it, anyone who can create a KafkaCluster, KafkaTopic or KafkaUser can make
+# the operator read any Secret in that namespace and send it to an endpoint they choose.
+requireSecretLabel: true
 
 crds:
   enabled: true        # render CRDs into templates/
@@ -67,6 +79,9 @@ podAnnotations: {}
 podLabels: {}
 podSecurityContext:
   runAsNonRoot: true
+  # distroless "nonroot" user; pinned so the kubelet can verify non-root.
+  runAsUser: 65532
+  runAsGroup: 65532
   seccompProfile:
     type: RuntimeDefault
 securityContext:

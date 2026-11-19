@@ -1065,6 +1065,17 @@ func TestTenancyTopicPrefixRuleEmptyPrefixesIsError(t *testing.T) {
 	require.Contains(t, errs[0].Error(), "prefixes must be non-empty")
 }
 
+func TestTenancyTopicPrefixRuleEmptyStringPrefixIsError(t *testing.T) {
+	cl := tenancyCluster(&v1alpha1.TenancyConfig{
+		TopicPrefixes: []v1alpha1.TopicPrefixRule{
+			{Namespaces: []string{"team-*"}, Prefixes: []string{"a.", ""}},
+		},
+	})
+	errs := Validate(Input{Clusters: map[string]*v1alpha1.KafkaCluster{"prod": cl}})
+	require.NotEmpty(t, errs)
+	require.Contains(t, errs[0].Error(), "prefixes[1]: prefix must be non-empty")
+}
+
 func TestTenancyTopicPrefixRuleBadNamespaceGlobIsError(t *testing.T) {
 	cl := tenancyCluster(&v1alpha1.TenancyConfig{
 		TopicPrefixes: []v1alpha1.TopicPrefixRule{

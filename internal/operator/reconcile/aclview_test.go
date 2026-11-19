@@ -182,3 +182,35 @@ func TestReconcileTopicNilViewMatchesPerCRBehavior(t *testing.T) {
 		t.Fatalf("nil view must keep per-CR prune semantics: %v", k.Calls())
 	}
 }
+
+// TestClusterACLView_AllowDenyConflictFailsClosed is the regression test for
+// the cross-resource prune-consent bypass: policy A (Allow, prune=true) and
+// policy B (Deny, prune=false) declare the same tuple. The view must keep the
+// DENY (fail closed) and must carry B's prune veto, so a live Deny ACL is
+// never a consented prune candidate on A's behalf.
+func TestClusterACLView_AllowDenyConflictFailsClosed(t *testing.T) {
+	allow := basePolicy("Enforce") // User:svc Read on topic payments.orders
+	allow.Name = "a-allow"
+	allow.Spec.Prune = true
+	deny := basePolicy("Enforce")
+	deny.Name = "b-deny"
+	deny.Spec.Rules[0].Permission = "Deny"
+	deny.Spec.Prune = false
+
+	for _, order := range [][]*v1alpha1.KafkaAccessPolicy{{allow, deny}, {deny, allow}} {
+		view := BuildClusterACLView(nil, []*v1alpha1.KafkaAccessPolicy{order[0].DeepCopy(), order[1].DeepCopy()}, nil, nil)
+		if len(view.Conflicts) == 0 {
+			t.Fatal("expected the Allow/Deny conflict to be reported")
+		}
+		for _, a := range view.DesiredACLs {
+			if a.Principal == "User:svc" && a.Operation == "Read" && a.Permission != "Deny" {
+				t.Fatalf("conflict must resolve to Deny, union kept %+v", a)
+			}
+		}
+		for k, info := range view.Scope {
+			if k.Principal == "User:svc" && info.Prune {
+				t.Fatalf("the Deny owner's prune=false must veto pruning on %+v", k)
+			}
+		}
+	}
+}

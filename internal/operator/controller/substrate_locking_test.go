@@ -405,6 +405,7 @@ func TestSubstrateLocking_PolicyFinalizerVsTopic(t *testing.T) {
 	tp := lockTestTopic("ns1", "orders", "prod", "payments.orders", "User:p1")
 	pol := lockTestPolicy("ns1", "payments-access", "prod", "payments.orders", "User:svc-payments")
 	pol.Finalizers = []string{FinalizerName}
+	pol.Status = &v1alpha1.KafkaAccessPolicyStatus{ObservedGeneration: pol.Generation}
 	pol.Annotations = map[string]string{"gitops.monedula.dev/allow-delete": "true"}
 	cl := newLockingFakeClient(t, s, c, tp, pol)
 	if err := cl.Delete(context.Background(), pol); err != nil {

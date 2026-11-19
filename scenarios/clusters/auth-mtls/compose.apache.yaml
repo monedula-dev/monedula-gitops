@@ -18,7 +18,7 @@
 # bootstrap step to translate).
 services:
   kafka:
-    image: ${MONEDULA_KAFKA_IMAGE:-apache/kafka:4.3.1}
+    image: ${MONEDULA_KAFKA_IMAGE:-apache/kafka:4.4.0}
     entrypoint:
       - bash
       - -c

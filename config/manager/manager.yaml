@@ -28,6 +28,9 @@ spec:
       serviceAccountName: monedula-manager
       securityContext:
         runAsNonRoot: true
+        # distroless "nonroot" user; pinned so the kubelet can verify non-root.
+        runAsUser: 65532
+        runAsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
       containers:

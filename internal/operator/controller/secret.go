@@ -7,17 +7,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/monedula-dev/monedula-gitops/internal/api/v1alpha1"
+	"github.com/monedula-dev/monedula-gitops/internal/operator"
 )
 
-// CredentialSourceLabel marks a Secret as a watched credential/TLS source. The
-// operator caches/watches only Secrets carrying this label = "true" (§11.4); a
-// change to such a Secret reconciles the referencing KafkaCluster AND the
-// data-plane resources on it promptly instead of at the periodic resync.
-const CredentialSourceLabel = "gitops.monedula.dev/credential-source"
+// CredentialSourceLabel marks a Secret as an opted-in credential source: the
+// operator only reads referenced Secrets carrying it (unless started with
+// --require-secret-label=false), and caches/watches only those, so a change
+// reconciles the referencing KafkaCluster AND the data-plane resources on it
+// promptly (§11.4). Defined in package operator (operator.CredentialSourceLabel).
+const CredentialSourceLabel = operator.CredentialSourceLabel
 
-// CredentialSourceLabelValue is the value CredentialSourceLabel must carry to
-// opt a Secret into the watch.
-const CredentialSourceLabelValue = "true"
+// CredentialSourceLabelValue is the value CredentialSourceLabel must carry.
+const CredentialSourceLabelValue = operator.CredentialSourceLabelValue
 
 // ClusterSecretNamesIndex is the KafkaCluster field index of referenced Secret
 // names (across every secretKeyRef-bearing spec field). It lets the watch

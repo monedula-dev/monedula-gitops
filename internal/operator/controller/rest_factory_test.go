@@ -29,7 +29,7 @@ func TestRESTForRotatesSecret(t *testing.T) {
 	s := newScheme(t)
 	_ = corev1.AddToScheme(s)
 	sec := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "rest", Namespace: "ns1"},
+		ObjectMeta: metav1.ObjectMeta{Name: "rest", Namespace: "ns1", Labels: map[string]string{CredentialSourceLabel: CredentialSourceLabelValue}},
 		Data:       map[string][]byte{"password": []byte("a")},
 	}
 	cl := fake.NewClientBuilder().WithScheme(s).WithObjects(sec).Build()

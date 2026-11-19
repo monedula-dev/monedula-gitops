@@ -131,6 +131,7 @@ func TestTopicDelete_SharedACLProtectedByLivePolicy(t *testing.T) {
 	tp := coOwnedTopic()
 	tp.Spec.DeletionPolicy = "Delete"
 	tp.Finalizers = []string{FinalizerName}
+	markReconciled(tp)
 	tp.Annotations = map[string]string{"gitops.monedula.dev/allow-delete": "true"}
 	pol := policyObj("Enforce") // live co-owner
 	c := topicCluster()
@@ -184,6 +185,7 @@ func TestTopicDelete_OtherDeletingPolicyDoesNotProtect(t *testing.T) {
 	tp := coOwnedTopic()
 	tp.Spec.DeletionPolicy = "Delete"
 	tp.Finalizers = []string{FinalizerName}
+	markReconciled(tp)
 	tp.Annotations = map[string]string{"gitops.monedula.dev/allow-delete": "true"}
 	pol := policyObj("Enforce")
 	pol.Finalizers = []string{FinalizerName} // keep it alive through Delete
@@ -216,6 +218,7 @@ func TestPolicyDelete_SharedACLProtectedByLiveTopic(t *testing.T) {
 	pol := policyObj("Enforce")
 	pol.Spec.DeletionPolicy = "Delete"
 	pol.Finalizers = []string{FinalizerName}
+	pol.Status = &v1alpha1.KafkaAccessPolicyStatus{ObservedGeneration: pol.Generation}
 	pol.Annotations = map[string]string{"gitops.monedula.dev/allow-delete": "true"}
 	tp := coOwnedTopic() // live co-owner
 	c := topicCluster()
@@ -265,6 +268,7 @@ func TestTopicDelete_CoClaimantFullOrphanSkipsShield(t *testing.T) {
 	tp := coOwnedTopic()
 	tp.Spec.DeletionPolicy = "Delete"
 	tp.Finalizers = []string{FinalizerName}
+	markReconciled(tp)
 	tp.Annotations = map[string]string{"gitops.monedula.dev/allow-delete": "true"}
 	pol := policyObj("Enforce")
 	cl := newViewFakeClient(t, s, tp, pol, topicCluster(), finalizerMirrorClaimant())
@@ -313,6 +317,7 @@ func TestTopicDelete_ViewBuildFailureBlocksDeletion(t *testing.T) {
 	tp := coOwnedTopic()
 	tp.Spec.DeletionPolicy = "Delete"
 	tp.Finalizers = []string{FinalizerName}
+	markReconciled(tp)
 	tp.Annotations = map[string]string{"gitops.monedula.dev/allow-delete": "true"}
 	c := topicCluster()
 	cl := newViewFakeClient(t, s, tp, c)

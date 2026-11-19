@@ -54,6 +54,12 @@ spec:
         {{- with .Values.clusterNamespace }}
         - --cluster-namespace={{ . }}
         {{- end }}
+        {{- with .Values.rbac.secretNamespaces }}
+        - --secret-namespaces={{ join "," . }}
+        {{- end }}
+        {{- if not .Values.requireSecretLabel }}
+        - --require-secret-label=false
+        {{- end }}
         {{- with .Values.resyncInterval }}
         - --resync-interval={{ . }}
         {{- end }}

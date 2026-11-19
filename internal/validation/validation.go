@@ -991,6 +991,13 @@ func validateTenancyConfig(clusterName string, t *v1alpha1.TenancyConfig) []erro
 				errs = append(errs, errf("KafkaCluster %s: tenancy.topicPrefixes[%d].namespaces[%d]: invalid glob pattern %q: %v", clusterName, i, j, pattern, err))
 			}
 		}
+		// An empty prefix matches every name (strings.HasPrefix(x, "") is
+		// always true) and would silently lift the namespace's restriction.
+		for j, prefix := range rule.Prefixes {
+			if prefix == "" {
+				errs = append(errs, errf("KafkaCluster %s: tenancy.topicPrefixes[%d].prefixes[%d]: prefix must be non-empty (an empty prefix matches every name)", clusterName, i, j))
+			}
+		}
 	}
 
 	return errs

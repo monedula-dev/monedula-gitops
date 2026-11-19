@@ -282,6 +282,28 @@ func (r *KafkaAccessPolicyReconciler) handleDeletionWithClient(ctx context.Conte
 			r.finalizeEvent(pol, corev1.EventTypeWarning, "DeleteNotApproved", msg)
 			return ctrl.Result{RequeueAfter: resyncInterval(r.ResyncInterval)}, nil
 		}
+		// Cleanup authorization: only delete ACLs this CR was allowed to
+		// manage. Spec stays mutable while the CR terminates, so a tenant
+		// could otherwise approve deletion and then repoint spec.rules at
+		// another team's resources or principals to have the operator revoke
+		// them; and a policy the tenancy policy denies never managed its
+		// ACLs. Orphan instead: no broker change, deletion never wedged.
+		var observed int64
+		var conds []metav1.Condition
+		if pol.Status != nil {
+			observed, conds = pol.Status.ObservedGeneration, pol.Status.Conditions
+		}
+		reason := cleanupNotApplied(pol.Generation, observed, conds)
+		if reason == "" {
+			if terr := reconcile.CheckPolicyTenancy(cluster.Spec.Tenancy, pol); terr != nil {
+				reason = terr.Error()
+			}
+		}
+		if reason != "" {
+			r.finalizeEvent(pol, corev1.EventTypeWarning, reasonCleanupSkipped,
+				"managed ACLs left in place: "+reason)
+			return r.removeFinalizer(ctx, pol)
+		}
 		if err := r.deletePolicyACLs(ctx, pol, k, cluster, clusterNS); err != nil {
 			r.finalizeEvent(pol, corev1.EventTypeWarning, "DeleteFailed", err.Error())
 			return ctrl.Result{}, err // transient: requeue, finalizer retained

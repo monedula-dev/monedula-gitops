@@ -35,6 +35,7 @@ import (
 	operatorwebhook "github.com/monedula-dev/monedula-gitops/internal/operator/webhook"
 	"github.com/monedula-dev/monedula-gitops/internal/schemaregistry"
 	"github.com/monedula-dev/monedula-gitops/internal/secrets"
+	"github.com/monedula-dev/monedula-gitops/internal/tenancy"
 )
 
 // topicRequeueAfter is the DEFAULT periodic resync interval, used when a
@@ -564,6 +565,25 @@ func (r *KafkaTopicReconciler) handleDeletion(ctx context.Context, topic *v1alph
 		return r.removeFinalizer(ctx, topic)
 	}
 
+	// 1b. Cleanup authorization. The finalizer acts with the operator's
+	// privileges, so it must only destroy what a reconcile of this CR was
+	// allowed to manage:
+	//   - the spec must be the one last reconciled. Kubernetes keeps spec
+	//     mutable while an object terminates, so without this gate a tenant
+	//     could delete its topic and then repoint spec.access / spec.schema at
+	//     another team's groups, principals or subjects to have the finalizer
+	//     revoke or delete them;
+	//   - the CURRENT tenancy policy must still allow the topic name, its
+	//     consumer groups and (below, per subject) its schema subjects.
+	// Either failure orphans instead of blocking: no external state is
+	// touched, and deletion can never be wedged by a spec edit or a tenancy
+	// change.
+	if reason := cleanupNotAuthorized(topic, cluster); reason != "" {
+		r.finalizeEvent(topic, corev1.EventTypeWarning, reasonCleanupSkipped,
+			"Kafka topic, ACLs and schema subjects left in place: "+reason)
+		return r.removeFinalizer(ctx, topic)
+	}
+
 	// 2. Co-claimant scan.
 	co, err := r.findDeletionCoClaimant(ctx, topic)
 	if err != nil {
@@ -609,6 +629,59 @@ func (r *KafkaTopicReconciler) handleDeletion(ctx context.Context, topic *v1alph
 	}
 	resolver := &operator.K8sResolver{Client: r.Client, Namespace: topic.Namespace, Ctx: ctx}
 	return r.handleDeletionWithClient(ctx, topic, k, sr, rest, resolver, cluster, clusterNS)
+}
+
+// reasonCleanupSkipped is the event reason when the finalizer orphans a
+// topic's external state because cleanup is not authorized.
+const reasonCleanupSkipped = "CleanupSkipped"
+
+// cleanupNotApplied returns a non-empty reason when a CR's current spec is
+// not one the operator applied, so its finalizer must not run destructive
+// cleanup:
+//   - the spec changed after the last reconcile (spec stays mutable while an
+//     object terminates, so a tenant could otherwise repoint a terminating CR
+//     at another team's state), or the CR was never reconciled at all (the
+//     finalizer is added before the validation and tenancy gates run);
+//   - ValidationFailed=True: the last reconcile refused the spec (invalid,
+//     tenancy-denied, conflicting, foreign Secret, ...) and mutated nothing,
+//     so there is nothing this CR owns to clean up.
+//
+// Only finalizers call this, i.e. for an object with a DeletionTimestamp. The
+// apiserver bumps metadata.generation by exactly one when it sets the
+// DeletionTimestamp of a finalized object, so observed == generation-1 is
+// still "the applied spec"; any spec edit after that bumps it further.
+// observed == generation is accepted too (a status written after deletion
+// began, and clients such as the fake client that do not bump).
+func cleanupNotApplied(generation, observed int64, conds []metav1.Condition) string {
+	// observed == 0: no status was ever written (generations start at 1).
+	if observed == 0 || (observed != generation && observed+1 != generation) {
+		return fmt.Sprintf("spec generation %d was never reconciled (last reconciled generation %d); "+
+			"cleanup only runs for a spec the operator has applied", generation, observed)
+	}
+	if c := meta.FindStatusCondition(conds, v1alpha1.CondValidationFailed); c != nil && c.Status == metav1.ConditionTrue {
+		return fmt.Sprintf("the operator never applied this spec (%s: %s)", c.Reason, c.Message)
+	}
+	return ""
+}
+
+// cleanupNotAuthorized returns a non-empty reason when the finalizer must not
+// run destructive cleanup for topic (see handleDeletion step 1b): the spec
+// changed since the last reconcile (status.observedGeneration lags
+// metadata.generation, e.g. an edit made after deletion was requested), or
+// the cluster's tenancy policy denies the topic name or a consumer group.
+func cleanupNotAuthorized(topic *v1alpha1.KafkaTopic, cluster *v1alpha1.KafkaCluster) string {
+	var observed int64
+	var conds []metav1.Condition
+	if topic.Status != nil {
+		observed, conds = topic.Status.ObservedGeneration, topic.Status.Conditions
+	}
+	if reason := cleanupNotApplied(topic.Generation, observed, conds); reason != "" {
+		return reason
+	}
+	if terr := reconcile.CheckTopicTenancy(cluster.Spec.Tenancy, topic, operatorwebhook.ResolvedTopicName(topic)); terr != nil {
+		return terr.Error()
+	}
+	return ""
 }
 
 // findDeletionCoClaimant runs the deletion co-claimant scan for topic: the
@@ -889,6 +962,14 @@ func (r *KafkaTopicReconciler) deleteTopicState(ctx context.Context, topic *v1al
 		return topicAbsent, nil // do not block finalization
 	}
 	for _, subj := range subjects {
+		// Subject names can come from spec.schema rather than the topic name
+		// (Custom / RecordName strategies): never delete one the namespace's
+		// tenancy policy does not grant it.
+		if terr := tenancy.CheckResource(cluster.Spec.Tenancy, topic.Namespace, "subject", subj, "literal"); terr != nil {
+			r.finalizeEvent(topic, corev1.EventTypeWarning, "SubjectDeletionFailed",
+				"schema registry subject "+subj+" left in place: "+terr.Error())
+			continue
+		}
 		if derr := sr.DeleteSubject(ctx, subj); derr != nil {
 			msg := "failed to delete schema registry subject " + subj + ": " + derr.Error()
 			logger.Error(derr, "subject deletion failed", "subject", subj, "topic", topic.Spec.TopicName)

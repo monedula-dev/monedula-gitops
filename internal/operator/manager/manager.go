@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	"github.com/monedula-dev/monedula-gitops/internal/api/v1alpha1"
+	"github.com/monedula-dev/monedula-gitops/internal/operator"
 	"github.com/monedula-dev/monedula-gitops/internal/operator/controller"
 	"github.com/monedula-dev/monedula-gitops/internal/operator/index"
 	"github.com/monedula-dev/monedula-gitops/internal/operator/locking"
@@ -72,6 +73,14 @@ type Options struct {
 	// default for local development and clusters that haven't installed the
 	// webhook config yet.
 	EnableWebhooks bool
+	// RequireSecretLabel makes the operator use only referenced Secrets labelled
+	// gitops.monedula.dev/credential-source=true (operator.SecretAccessPolicy).
+	// The CLI defaults it to true.
+	RequireSecretLabel bool
+	// SecretNamespaces, when non-empty, confines every Secret read, write and
+	// watch to these namespaces, so the operator only needs namespaced Secret
+	// RBAC there instead of a cluster-wide grant. Empty: all namespaces.
+	SecretNamespaces []string
 	// WebhookCertDir overrides the directory the webhook server reads its serving
 	// key/cert from. Empty uses the controller-runtime default
 	// (/tmp/k8s-webhook-server/serving-certs). Only consulted when EnableWebhooks.
@@ -203,14 +212,29 @@ func Run(ctx context.Context, opts Options) error {
 	// not in the informer. Without this, client.Get on an unlabelled ConfigMap or
 	// Secret would return NotFound from the label-scoped cache and break schema
 	// resolution / credential lookups.
+	// Secret access policy (opt-in label, namespace scope): installed before any
+	// controller starts, consulted by every Secret read/write.
+	operator.SetSecretAccessPolicy(operator.SecretAccessPolicy{
+		RequireLabel: opts.RequireSecretLabel,
+		Namespaces:   opts.SecretNamespaces,
+	})
+	secretCache := cache.ByObject{
+		Label: labels.SelectorFromSet(labels.Set{controller.CredentialSourceLabel: controller.CredentialSourceLabelValue}),
+	}
+	if len(opts.SecretNamespaces) > 0 {
+		// Namespaced Secret RBAC only: a cluster-wide list/watch would be
+		// forbidden, so scope the Secret informer to the allowed namespaces.
+		secretCache.Namespaces = map[string]cache.Config{}
+		for _, ns := range opts.SecretNamespaces {
+			secretCache.Namespaces[ns] = cache.Config{}
+		}
+	}
 	mgrOpts.Cache = cache.Options{
 		ByObject: map[client.Object]cache.ByObject{
 			&corev1.ConfigMap{}: {
 				Label: labels.SelectorFromSet(labels.Set{controller.SchemaSourceLabel: controller.SchemaSourceLabelValue}),
 			},
-			&corev1.Secret{}: {
-				Label: labels.SelectorFromSet(labels.Set{controller.CredentialSourceLabel: controller.CredentialSourceLabelValue}),
-			},
+			&corev1.Secret{}: secretCache,
 		},
 	}
 	mgrOpts.Client = client.Options{

@@ -230,15 +230,37 @@ func BuildClusterACLView(topics []*v1alpha1.KafkaTopic, policies []*v1alpha1.Kaf
 	// FullKey() is the canonical 7-field identity (single source of truth);
 	// the three source-attribution fields break ties across resources that
 	// share the same identity tuple.
-	sort.Slice(all, func(i, j int) bool {
-		ki := all[i].FullKey() + "|" + all[i].SourceKind + "|" + all[i].SourceNamespace + "|" + all[i].SourceName
-		kj := all[j].FullKey() + "|" + all[j].SourceKind + "|" + all[j].SourceNamespace + "|" + all[j].SourceName
-		return ki < kj
-	})
+	//
+	// Deny sorts BEFORE Allow for the same tuple (aclViewSortKey), so a
+	// cross-resource Allow/Deny conflict resolves fail-closed: the Deny is the
+	// first-seen survivor and the Allow is dropped. Resolving toward Allow
+	// would let one tenant's policy override (and, with prune, delete) a Deny
+	// another resource put in place.
+	sort.Slice(all, func(i, j int) bool { return aclViewSortKey(all[i]) < aclViewSortKey(all[j]) })
 
-	union, _ := access.BuildDesiredSet(all) // conflicts: first-seen wins, see doc
+	union, _ := access.BuildDesiredSet(all) // conflicts: first-seen (Deny) wins, see doc
 	conflicts := access.Conflicts(all)      // cross-resource Allow/Deny disagreements
-	return &ClusterACLView{DesiredACLs: union, Scope: access.BuildScope(union), Conflicts: conflicts}
+	// The scope is built from EVERY contributor, not just the deduped union:
+	// a conflict loser is dropped from the union, but its owner's prune
+	// consent must still take part in the AND-merge. Building the scope from
+	// the union alone let the surviving side's prune=true stand as unanimous
+	// consent over a tuple the losing owner never agreed to prune.
+	return &ClusterACLView{DesiredACLs: union, Scope: access.BuildScope(all), Conflicts: conflicts}
+}
+
+// aclViewSortKey orders ACLs for BuildClusterACLView: by the 7-field
+// identity with the permission ranked Deny-first (so an Allow/Deny conflict
+// on one tuple resolves to the Deny), then by source attribution to break
+// ties between resources declaring the identical tuple.
+func aclViewSortKey(a access.ACL) string {
+	perm := "1" + a.Permission
+	if a.Permission == "Deny" {
+		perm = "0Deny"
+	}
+	// FullKey is the canonical NUL-separated identity ending in the permission;
+	// swap that suffix for the Deny-first rank.
+	id := strings.TrimSuffix(a.FullKey(), a.Permission) + perm
+	return id + "|" + a.SourceKind + "|" + a.SourceNamespace + "|" + a.SourceName
 }
 
 // ReconcileTopic builds the desired state for a KafkaTopic, observes live state,
@@ -311,26 +333,11 @@ func ReconcileTopic(ctx context.Context, topic *v1alpha1.KafkaTopic, cluster *v1
 	if cluster != nil {
 		clusterTenancy = cluster.Spec.Tenancy
 	}
-	if err := tenancy.Check(clusterTenancy, topic.Namespace, topicName); err != nil {
+	if err := CheckTopicTenancy(clusterTenancy, topic, topicName); err != nil {
 		msg := err.Error()
 		st.Phase = v1alpha1.PhaseError
 		setTerminalValidationFailed(kindKafkaTopic, &st.Conditions, reasonTenancyDenied, msg, topic.Generation)
 		return st, nil // terminal: needs a tenancy config or namespace change
-	}
-	// Consumer GROUP names in the access block are tenancy-checked like topics
-	// (groups reuse topic prefixes, spec §20.2): both the acl backend (group
-	// Read ACLs via access.CompileTopic) and the rbac backend (DeveloperRead on
-	// the group via rbac.CompileTopicAccess) derive live grants from these
-	// names, so an unchecked group name would let a prefix-restricted namespace
-	// grant access to another team's consumer group. Checking once here covers
-	// both backends; reconcileTopicRoleBindings does not re-check.
-	for _, c := range topic.Spec.Access.Consumers {
-		if err := tenancy.CheckResource(clusterTenancy, topic.Namespace, "group", c.Group, "literal"); err != nil {
-			msg := err.Error()
-			st.Phase = v1alpha1.PhaseError
-			setTerminalValidationFailed(kindKafkaTopic, &st.Conditions, reasonTenancyDenied, msg, topic.Generation)
-			return st, nil // terminal: needs a tenancy config or namespace change
-		}
 	}
 
 	// Desired ACLs (topic-local access). A conflict is a validation failure.
@@ -367,6 +374,18 @@ func ReconcileTopic(ctx context.Context, topic *v1alpha1.KafkaTopic, cluster *v1
 		if err != nil {
 			schemaResolveErr = err.Error()
 		} else {
+			// Subject tenancy: subject names come from spec.schema (Custom
+			// valueSubject/keySubject, or the record name under RecordName),
+			// not only from the already-checked topic name, so each one must
+			// carry one of the namespace's allowed prefixes. Checked before
+			// any registry read or write.
+			for _, d := range ds {
+				if terr := tenancy.CheckResource(clusterTenancy, topic.Namespace, "subject", d.Subject, "literal"); terr != nil {
+					st.Phase = v1alpha1.PhaseError
+					setTerminalValidationFailed(kindKafkaTopic, &st.Conditions, reasonTenancyDenied, terr.Error(), topic.Generation)
+					return st, nil // terminal: needs a spec or tenancy config change
+				}
+			}
 			desiredSchemas = ds
 			schemaValueSubject = vs
 		}
@@ -596,14 +615,11 @@ func ReconcilePolicy(ctx context.Context, pol *v1alpha1.KafkaAccessPolicy, clust
 	if cluster != nil {
 		clusterTenancy = cluster.Spec.Tenancy
 	}
-	for _, rule := range pol.Spec.Rules {
-		if err := tenancy.CheckResource(clusterTenancy, pol.Namespace,
-			rule.Resource.Type, rule.Resource.Name, rule.Resource.PatternType); err != nil {
-			msg := err.Error()
-			st.Phase = v1alpha1.PhaseError
-			setTerminalValidationFailed(kindKafkaAccessPolicy, &st.Conditions, reasonTenancyDenied, msg, pol.Generation)
-			return st, nil // terminal: needs a tenancy config or namespace change
-		}
+	if err := CheckPolicyTenancy(clusterTenancy, pol); err != nil {
+		msg := err.Error()
+		st.Phase = v1alpha1.PhaseError
+		setTerminalValidationFailed(kindKafkaAccessPolicy, &st.Conditions, reasonTenancyDenied, msg, pol.Generation)
+		return st, nil // terminal: needs a tenancy config or namespace change
 	}
 
 	desiredACLs, errs := access.BuildDesiredSet(access.CompilePolicy(pol))
@@ -798,6 +814,39 @@ func buildDesiredSchemas(topic *v1alpha1.KafkaTopic, topicName string, r secrets
 		})
 	}
 	return out, valueSubject, nil
+}
+
+// CheckTopicTenancy enforces the cluster tenancy policy (spec §20.2) on the
+// parts of a KafkaTopic that do not need live clients: the resolved topic
+// name and every consumer GROUP in the access block (groups reuse topic
+// prefixes; both the acl backend's group Read ACLs and the rbac backend's
+// DeveloperRead derive live grants from these names). It is shared by the
+// reconcile path and the finalizer, so the finalizer never cleans up state a
+// reconcile would have refused to manage. Subject names are checked
+// separately (they need the schema bodies for some strategies).
+func CheckTopicTenancy(t *v1alpha1.TenancyConfig, topic *v1alpha1.KafkaTopic, topicName string) error {
+	if err := tenancy.Check(t, topic.Namespace, topicName); err != nil {
+		return err
+	}
+	for _, c := range topic.Spec.Access.Consumers {
+		if err := tenancy.CheckResource(t, topic.Namespace, "group", c.Group, "literal"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// CheckPolicyTenancy enforces the cluster tenancy policy on every rule of a
+// KafkaAccessPolicy (first denial wins). Shared by the reconcile path and the
+// finalizer so the finalizer never deletes ACLs a reconcile would refuse.
+func CheckPolicyTenancy(t *v1alpha1.TenancyConfig, pol *v1alpha1.KafkaAccessPolicy) error {
+	for _, rule := range pol.Spec.Rules {
+		if err := tenancy.CheckResource(t, pol.Namespace,
+			rule.Resource.Type, rule.Resource.Name, rule.Resource.PatternType); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ManagedSubjects computes the list of Schema Registry subjects that the topic

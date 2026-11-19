@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -380,4 +381,29 @@ func TestHelmDeploymentMirrorFlags(t *testing.T) {
 	defaults := helmTemplate(t)
 	require.NotContains(t, defaults, "--mirror-stall-threshold")
 	require.NotContains(t, defaults, "--finalizer-verification-timeout")
+}
+
+// TestHelmSecretNamespacesScopesSecretRBAC pins rbac.secretNamespaces: the
+// ClusterRole loses its cluster-wide Secret rule, each listed namespace gets a
+// Role + RoleBinding granting the same Secret verbs, and the operator is told
+// the same namespaces via --secret-namespaces. The default keeps today's
+// cluster-wide rule and passes no flag.
+func TestHelmSecretNamespacesScopesSecretRBAC(t *testing.T) {
+	def := helmTemplate(t)
+	require.NotContains(t, def, "--secret-namespaces")
+	require.NotContains(t, def, "--require-secret-label")
+	require.Contains(t, def, "- secrets")
+
+	// Templates may be checked out with CRLF line endings (Windows); normalise.
+	out := strings.ReplaceAll(helmTemplate(t, "rbac.secretNamespaces={kafka-system,team-a}"), "\r\n", "\n")
+	rules := normaliseRules(t, extractClusterRoleRules(t, out, "-manager-role"))
+	require.NotContains(t, fmt.Sprint(rules), "secrets", "ClusterRole must not grant Secrets when secretNamespaces is set")
+	require.Contains(t, out, "--secret-namespaces=kafka-system,team-a")
+	for _, ns := range []string{"kafka-system", "team-a"} {
+		require.Contains(t, out, "kind: Role\nmetadata:\n  name: t-monedula-gitops-secrets\n  namespace: "+ns)
+		require.Contains(t, out, "kind: RoleBinding\nmetadata:\n  name: t-monedula-gitops-secrets\n  namespace: "+ns)
+	}
+
+	off := helmTemplate(t, "requireSecretLabel=false")
+	require.Contains(t, off, "--require-secret-label=false")
 }

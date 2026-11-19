@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -97,7 +98,7 @@ func generatePasswordSpec() *v1alpha1.UserPassword {
 // refStore returns a store holding Secret "creds" with data[password]=pw at rv.
 func refStore(pw, rv string) *fakeSecretStore {
 	return &fakeSecretStore{secrets: map[string]*PasswordSecret{
-		"creds": {Data: map[string][]byte{"password": []byte(pw)}, ResourceVersion: rv},
+		"creds": {Data: map[string][]byte{"password": []byte(pw)}, ResourceVersion: rv, Labeled: true},
 	}}
 }
 
@@ -552,4 +553,30 @@ func containsCall(calls []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// TestReconcileUserReferencedUnlabelledSecretTerminal: naming a Secret in a
+// KafkaUser is not enough to make the operator use it as a password; an
+// unlabelled Secret is a terminal SecretNotLabeled failure with no broker write.
+func TestReconcileUserReferencedUnlabelledSecretTerminal(t *testing.T) {
+	k := kafkamock.New(nil, nil)
+	u := mkUser(secretRefPassword("creds", "password"))
+	store := refStore("s3cr3t", "5")
+	store.secrets["creds"].Labeled = false
+
+	st, err := ReconcileUser(context.Background(), u, cluster(), k, store)
+	if err != nil {
+		t.Fatalf("terminal failure must return nil error, got %v", err)
+	}
+	if st.Phase != v1alpha1.PhaseError {
+		t.Fatalf("phase = %q, want Error", st.Phase)
+	}
+	if s, reason, _ := condStatus(st.Conditions, v1alpha1.CondValidationFailed); s != metav1.ConditionTrue || reason != reasonSecretNotLabeled {
+		t.Fatalf("ValidationFailed = %v/%q, want True/%s", s, reason, reasonSecretNotLabeled)
+	}
+	for _, c := range k.Calls() {
+		if strings.HasPrefix(c, "Upsert") || strings.HasPrefix(c, "AlterScram") {
+			t.Fatalf("no credential write expected, got %v", k.Calls())
+		}
+	}
 }

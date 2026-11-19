@@ -176,6 +176,7 @@ func TestQuorumRecheck_DeletionRevealsCoClaimant(t *testing.T) {
 	doomed := stampedUser("ns1", "svc-del", "prod", "svc-shared", dupT0)
 	doomed.Spec.DeletionPolicy = "Delete"
 	doomed.Finalizers = []string{FinalizerName}
+	doomed.Status = &v1alpha1.KafkaUserStatus{ObservedGeneration: doomed.Generation} // last reconcile applied it
 	survivor := stampedUser("ns1", "svc-live", "prod", "svc-shared", dupLater())
 	cache := dupFakeClient(t, s, doomed, topicCluster()) // lagging: survivor not yet visible
 	quorum := &countingReader{reader: dupFakeClient(t, s, survivor, topicCluster())}

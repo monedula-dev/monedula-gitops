@@ -50,6 +50,9 @@ func deletingDeleteTopic(t *testing.T, annotations map[string]string, extra ...c
 	tp.Spec.DeletionPolicy = "Delete"
 	tp.Finalizers = []string{FinalizerName}
 	tp.Annotations = annotations
+	// Last reconciled at the current generation: the finalizer only cleans up a
+	// spec the operator has applied (cleanupNotAuthorized).
+	tp.Status = &v1alpha1.KafkaTopicStatus{ObservedGeneration: tp.Generation}
 	objs := append([]client.Object{tp, topicCluster()}, extra...)
 	cl := newTopicFakeClient(t, s, objs...)
 	if err := cl.Delete(context.Background(), tp); err != nil {
