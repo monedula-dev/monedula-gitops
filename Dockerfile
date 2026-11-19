@@ -7,7 +7,7 @@
 # multi-arch builds fast cross-compilation instead of slow QEMU-emulated
 # native builds. Go's toolchain cross-compiles natively, so nothing else
 # needs to run under emulation.
-FROM --platform=$BUILDPLATFORM golang:1.26 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27 AS build
 ARG VERSION=dev
 ARG COMMIT=none
 ARG DATE=unknown
