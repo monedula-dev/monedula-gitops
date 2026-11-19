@@ -52,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   behaviour with `--require-secret-label=false` (chart: `requireSecretLabel: false`). Unlabelled
   references fail with an error naming the Secret and the label; a KafkaUser reports
   `SecretNotLabeled`, and a KafkaCluster's `CredentialSourceUnwatched` condition lists them.
-- Go 1.26.11 minimum (`go.mod`); all Go dependencies updated to their latest releases that support it.
+- Go 1.27.4 minimum (`go.mod`); all Go dependencies updated to their latest releases.
 - **Operator, `KafkaTopic` finalizer:** the `gitops.monedula.dev/force-finalizer-removal`
   annotation now always orphans: the finalizer is removed with no topic, ACL or schema cleanup,
   even when the cluster is reachable and `gitops.monedula.dev/allow-delete` is set.
