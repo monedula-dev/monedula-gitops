@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-11
+
 ### Added
 - **Namespaced Secret RBAC:** new operator flag `--secret-namespaces` and chart value
   `rbac.secretNamespaces`. When set, the chart drops Secret access from the ClusterRole and grants it
@@ -446,6 +448,7 @@ First public release.
   batched `DescribeTopicConfigs` request for all topics instead of one round-trip per topic
   (per-topic error semantics and result ordering are unchanged).
 
-[Unreleased]: https://github.com/monedula-dev/monedula-gitops/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/monedula-dev/monedula-gitops/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/monedula-dev/monedula-gitops/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/monedula-dev/monedula-gitops/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/monedula-dev/monedula-gitops/releases/tag/v0.1.0
