@@ -265,7 +265,7 @@ func (v *KafkaAccessPolicyValidator) checkConflict(ctx context.Context, pol *v1a
 		return fmt.Errorf(
 			"KafkaAccessPolicy %s/%s introduces an ACL conflict with %s %s/%s on subject %q: "+
 				"Allow/Deny disagreement on the same ACL tuple (spec §21); "+
-				"the tuple will be dropped from the applied set — resolve the disagreement before admission",
+				"the operator would apply the Deny and drop the Allow — resolve the disagreement before admission",
 			pol.Namespace, pol.Name, otherKind, otherNS, otherName, cf.Subject)
 	}
 	return nil

@@ -2018,6 +2018,12 @@ func TestSetACLConflictConditionIsPartyAsA(t *testing.T) {
 	if !strings.Contains(c.Message, "the-subject") {
 		t.Fatalf("ACLConflict message = %q, want to contain subject %q", c.Message, "the-subject")
 	}
+	// Party A holds the Allow: the message must say its Allow loses to the Deny.
+	for _, want := range []string{"this resource's Allow", "the Deny from KafkaAccessPolicy/ns1/policy-p1", "the Deny is applied and the Allow is not"} {
+		if !strings.Contains(c.Message, want) {
+			t.Fatalf("ACLConflict message = %q, want to contain %q", c.Message, want)
+		}
+	}
 }
 
 // TestSetACLConflictConditionIsPartyAsB verifies that when the resource is party
@@ -2044,6 +2050,10 @@ func TestSetACLConflictConditionIsPartyAsB(t *testing.T) {
 	}
 	if !strings.Contains(c.Message, "ns1/topic-t1") {
 		t.Fatalf("ACLConflict message = %q, want to contain other party namespace/name %q", c.Message, "ns1/topic-t1")
+	}
+	// Party B holds the Deny, which is the side that is applied.
+	if !strings.Contains(c.Message, "this resource's Deny conflicts with the Allow") {
+		t.Fatalf("ACLConflict message = %q, want it to name this resource's Deny against the Allow", c.Message)
 	}
 }
 

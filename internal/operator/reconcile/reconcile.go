@@ -194,8 +194,9 @@ type ClusterACLView struct {
 // the AND-merge sees every owner's consent. clusterDefaults may be nil.
 //
 // Cross-resource Allow/Deny conflicts (which no single-resource validation can
-// see) are resolved first-seen-wins, exactly as BuildDesiredSet documents: the
-// conflicting tuple is dropped from the union. That is deliberate — the view
+// see) are resolved first-seen-wins, exactly as BuildDesiredSet documents, and
+// the Deny-first sort makes the Deny that first-seen survivor: the Allow is
+// dropped from the union and the Deny is applied. That is deliberate — the view
 // must stay buildable so reconciles keep running; the conflict surfaces as
 // drift on the losing resource.
 func BuildClusterACLView(topics []*v1alpha1.KafkaTopic, policies []*v1alpha1.KafkaAccessPolicy,
@@ -1435,7 +1436,8 @@ func setTerminalValidationFailedReasons(kind string, conds *[]metav1.Condition, 
 // True (reason CrossResourceConflict) when this resource (kind/namespace/name)
 // is a party to any conflict in the view, naming the other party + subject;
 // else False (reason NoConflict). NON-terminal — informational only; the
-// conflicting tuple is already dropped from the applied union (no flapping).
+// view already resolved the conflict to the Deny (the Allow is dropped from
+// the applied union, no flapping).
 // When view is nil (single-resource fallback), the condition is cleared.
 func setACLConflictCondition(conds *[]metav1.Condition, view *ClusterACLView, kind, namespace, name string, gen int64) {
 	if view == nil {
@@ -1446,17 +1448,17 @@ func setACLConflictCondition(conds *[]metav1.Condition, view *ClusterACLView, ki
 		return c.SourceKind == kind && c.SourceNamespace == namespace && c.SourceName == name
 	}
 	for _, cf := range view.Conflicts {
-		var other access.ACL
+		var mine, other access.ACL
 		switch {
 		case isParty(cf.A):
-			other = cf.B
+			mine, other = cf.A, cf.B
 		case isParty(cf.B):
-			other = cf.A
+			mine, other = cf.B, cf.A
 		default:
 			continue
 		}
-		msg := fmt.Sprintf("ACL %s conflicts Allow/Deny with %s/%s/%s on the same tuple; the tuple is dropped from the applied set",
-			cf.Subject, other.SourceKind, other.SourceNamespace, other.SourceName)
+		msg := fmt.Sprintf("ACL %s: this resource's %s conflicts with the %s from %s/%s/%s on the same tuple; the Deny is applied and the Allow is not",
+			cf.Subject, mine.Permission, other.Permission, other.SourceKind, other.SourceNamespace, other.SourceName)
 		setCond(conds, v1alpha1.CondACLConflict, metav1.ConditionTrue, reasonCrossResourceConflict, msg, gen)
 		return
 	}

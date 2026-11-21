@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Operator, ACL conflicts:** the `ACLConflict` condition and the `KafkaAccessPolicy` webhook
+  rejection now say that the Deny is applied and the Allow is dropped, and the condition names
+  which side this resource holds. Since 1.1.0 they still said the whole ACL tuple was dropped.
+
 ## [1.1.0] - 2026-11-11
 
 ### Added
