@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Quickstarts and test matrix:** Confluent Platform images move to their latest patch
+  releases: 8.3.1 → 8.3.3, 8.0.7 → 8.0.9, 7.9.9 → 7.9.11, 7.6.13 → 7.6.15 (`cp-kafka`,
+  `cp-server`, `cp-schema-registry`), and `apache/kafka` 4.3.1 → 4.3.2. CP 8.3.3 bundles
+  Jetty 12.0.39, Temurin 25.0.5.1+2 and Go 1.27.4 in its `ub` utilities, which clears the
+  Critical and High CVEs reported against the 8.3.1 images. The operator image is unaffected.
+
 ### Fixed
 - **Operator, ACL conflicts:** the `ACLConflict` condition and the `KafkaAccessPolicy` webhook
   rejection now say that the Deny is applied and the Allow is dropped, and the condition names

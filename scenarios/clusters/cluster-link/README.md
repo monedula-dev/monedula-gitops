@@ -2,14 +2,14 @@
 
 > DEV ONLY — two single-node cp-server clusters over PLAINTEXT, no authentication. Not for production.
 
-Two single-node KRaft Confluent Server clusters (`confluentinc/cp-server:8.3.1`), a source
+Two single-node KRaft Confluent Server clusters (`confluentinc/cp-server:8.3.3`), a source
 and a destination, joined by the destination-side cluster link `src-to-dest`. Used by the
 `26-mirror-topic` e2e scenario to prove the product's Kafka REST client
 (`internal/kafkarest/confluent`) can create and verify `KafkaMirrorTopic` resources against
 real Confluent cluster linking.
 
 The image reads `MONEDULA_KAFKA_IMAGE` like every other profile; in practice this profile
-runs only under the `cp-8.3-link` cell, which pins the same `confluentinc/cp-server:8.3.1`
+runs only under the `cp-8.3-link` cell, which pins the same `confluentinc/cp-server:8.3.3`
 that the compose file carries as its literal default. Cluster linking needs no license key
 (`confluent.cluster.link.enable` defaults to true).
 
@@ -17,9 +17,9 @@ that the compose file carries as its literal default. Cluster linking needs no l
 
 | Container | Image | Role |
 |---|---|---|
-| `monedula-cl-source` | `confluentinc/cp-server:8.3.1` | Source cluster; mirror topics read from it |
-| `monedula-cl-dest` | `confluentinc/cp-server:8.3.1` | Destination cluster the product manages; embedded REST v3 on :8090 |
-| `monedula-cl-setup` | `confluentinc/cp-server:8.3.1` | One-shot: creates the topics below and the `src-to-dest` link |
+| `monedula-cl-source` | `confluentinc/cp-server:8.3.3` | Source cluster; mirror topics read from it |
+| `monedula-cl-dest` | `confluentinc/cp-server:8.3.3` | Destination cluster the product manages; embedded REST v3 on :8090 |
+| `monedula-cl-setup` | `confluentinc/cp-server:8.3.3` | One-shot: creates the topics below and the `src-to-dest` link |
 
 `link-setup` waits for both brokers to be healthy, then creates:
 

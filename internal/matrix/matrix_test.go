@@ -78,7 +78,7 @@ func TestSchemaRegistryImageMatchesCapability(t *testing.T) {
 func TestGet(t *testing.T) {
 	c, err := Get("cp-8.3")
 	require.NoError(t, err)
-	assert.Equal(t, "confluentinc/cp-kafka:8.3.1", c.Image)
+	assert.Equal(t, "confluentinc/cp-kafka:8.3.3", c.Image)
 
 	_, err = Get("no-such-cell")
 	require.Error(t, err)

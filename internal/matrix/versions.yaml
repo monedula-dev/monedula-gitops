@@ -31,7 +31,7 @@ cells:
 
   - id: ak-4.3
     family: apache
-    image: apache/kafka:4.3.1
+    image: apache/kafka:4.3.2
     tiers: [integration]
     capabilities: [topics, acls, quotas, scram]
 
@@ -40,7 +40,7 @@ cells:
   - id: ak-4.4
     family: apache
     image: apache/kafka:4.4.0
-    schemaRegistryImage: confluentinc/cp-schema-registry:8.3.1
+    schemaRegistryImage: confluentinc/cp-schema-registry:8.3.3
     tiers: [integration, e2e]
     capabilities: [topics, acls, quotas, scram, schemaregistry]
 
@@ -54,8 +54,8 @@ cells:
   # scenarios/clusters/shared-sasl/config/schema-registry-jaas-jetty9.conf.
   - id: cp-7.6
     family: confluent
-    image: confluentinc/cp-kafka:7.6.13
-    schemaRegistryImage: confluentinc/cp-schema-registry:7.6.13
+    image: confluentinc/cp-kafka:7.6.15
+    schemaRegistryImage: confluentinc/cp-schema-registry:7.6.15
     tiers: [integration]
     capabilities: [topics, acls, quotas, scram, schemaregistry]
     overlays: [jetty9]
@@ -63,23 +63,23 @@ cells:
   # overlays: [jetty9] -- same Jetty 9 vs 12 JAAS package split as cp-7.6 above.
   - id: cp-7.9
     family: confluent
-    image: confluentinc/cp-kafka:7.9.9
-    schemaRegistryImage: confluentinc/cp-schema-registry:7.9.9
+    image: confluentinc/cp-kafka:7.9.11
+    schemaRegistryImage: confluentinc/cp-schema-registry:7.9.11
     tiers: [integration, e2e]
     capabilities: [topics, acls, quotas, scram, schemaregistry]
     overlays: [jetty9]
 
   - id: cp-8.0
     family: confluent
-    image: confluentinc/cp-kafka:8.0.7
-    schemaRegistryImage: confluentinc/cp-schema-registry:8.0.7
+    image: confluentinc/cp-kafka:8.0.9
+    schemaRegistryImage: confluentinc/cp-schema-registry:8.0.9
     tiers: [integration]
     capabilities: [topics, acls, quotas, scram, schemaregistry]
 
   - id: cp-8.3
     family: confluent
-    image: confluentinc/cp-kafka:8.3.1
-    schemaRegistryImage: confluentinc/cp-schema-registry:8.3.1
+    image: confluentinc/cp-kafka:8.3.3
+    schemaRegistryImage: confluentinc/cp-schema-registry:8.3.3
     default: true
     tiers: [integration, e2e]
     capabilities: [topics, acls, quotas, scram, schemaregistry]
@@ -88,7 +88,7 @@ cells:
   # lookup/rolebindings endpoint the product's MDS client uses.
   - id: cp-7.6-mds
     family: confluent
-    image: confluentinc/cp-server:7.6.13
+    image: confluentinc/cp-server:7.6.15
     profile: auth-mds
     tiers: [e2e]
     capabilities: [topics, acls, quotas, scram, mds]
@@ -97,7 +97,7 @@ cells:
   # mirror topics are managed through. Two linked single-node clusters.
   - id: cp-8.3-link
     family: confluent
-    image: confluentinc/cp-server:8.3.1
+    image: confluentinc/cp-server:8.3.3
     profile: cluster-link
     tiers: [e2e]
     capabilities: [topics, acls, cluster-linking]
