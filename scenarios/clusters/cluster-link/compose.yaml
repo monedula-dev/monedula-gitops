@@ -1,5 +1,5 @@
 # Monedula e2e scenario cluster: two single-node KRaft Confluent Server
-# (cp-server 8.3.1) clusters joined by a destination-side cluster link.
+# (cp-server 8.3.3) clusters joined by a destination-side cluster link.
 #
 #   source  - the cluster mirror topics read from (no auth, no authorizer).
 #   dest    - the cluster the product manages: KafkaMirrorTopic resources are
@@ -41,7 +41,7 @@ x-common-env: &common-env
 
 services:
   source:
-    image: ${MONEDULA_KAFKA_IMAGE:-confluentinc/cp-server:8.3.1}
+    image: ${MONEDULA_KAFKA_IMAGE:-confluentinc/cp-server:8.3.3}
     container_name: monedula-cl-source
     hostname: source
     ports:
@@ -59,7 +59,7 @@ services:
       retries: 60
 
   dest:
-    image: ${MONEDULA_KAFKA_IMAGE:-confluentinc/cp-server:8.3.1}
+    image: ${MONEDULA_KAFKA_IMAGE:-confluentinc/cp-server:8.3.3}
     container_name: monedula-cl-dest
     hostname: dest
     ports:
@@ -85,7 +85,7 @@ services:
       retries: 60
 
   link-setup:
-    image: ${MONEDULA_KAFKA_IMAGE:-confluentinc/cp-server:8.3.1}
+    image: ${MONEDULA_KAFKA_IMAGE:-confluentinc/cp-server:8.3.3}
     container_name: monedula-cl-setup
     restart: "no"
     depends_on:

@@ -80,7 +80,7 @@ spec:
         # Combine server.crt + server.key into a PEM keystore file before the
         # broker starts. The broker reads ssl.keystore.location which points here.
         - name: build-pem-keystore
-          image: confluentinc/cp-kafka:8.3.1
+          image: confluentinc/cp-kafka:8.3.3
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -108,7 +108,7 @@ spec:
               memory: 256Mi
       containers:
         - name: kafka
-          image: confluentinc/cp-kafka:8.3.1
+          image: confluentinc/cp-kafka:8.3.3
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -245,7 +245,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: bootstrap
-          image: confluentinc/cp-kafka:8.3.1
+          image: confluentinc/cp-kafka:8.3.3
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
